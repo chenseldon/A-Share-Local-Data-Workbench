@@ -23,12 +23,18 @@ This project is a local A-share financial data workbench for research, data insp
 - Frontend install: `cd frontend && npm install`
 - Frontend dev server: `cd frontend && npm run dev`
 - Frontend build: `cd frontend && npm run build`
+- Docker config check: `docker compose config`
+- Docker build: `docker compose build`
+- Docker run: `docker compose up --build`
+- Docker demo run: `docker compose --env-file .env.docker.example up --build`
+- Docker stop: `docker compose down`
 
 ## Data And Research Safety
 - Distinguish `trade_date` from `fetched_at`; do not use fetch time as a market observation time.
 - Mark missing, stale, failed, and not-yet-collected data explicitly.
 - Fixtures and demo data must be labeled as fixtures and must not be presented as current market data.
 - Backtest or signal outputs must never be framed as trade instructions.
+- Docker images must not bake in local DuckDB files or research data; use the `ashare-data` volume.
 
 ## Git
 - Run `git status --short --branch` before scoped changes.

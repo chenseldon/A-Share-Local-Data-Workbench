@@ -10,11 +10,14 @@
 - Use DuckDB for the V1 local database because it is lightweight, file-based, and suitable for local research snapshots.
 - Use React + Vite + TypeScript for the workbench UI.
 - Keep all trading actions out of scope.
+- Package Docker deployment as two services: FastAPI backend plus Nginx-served frontend.
+- Store containerized DuckDB state in the `ashare-data` Docker volume at `/data/ashare.duckdb`.
 
 ## Data Notes
 - Public web data sources can fail due to throttling, anti-scraping controls, schema drift, or source outages.
 - All external data should be represented with `source`, `fetched_at`, and freshness state.
 - Demo fixtures are allowed only for development and testing, and must be labeled as fixtures.
+- Docker demo mode is opt-in through `.env.docker.example` or `ASHARE_DEMO_DATA=1`; default Compose runs with an empty local database.
 
 ## Secrets
 - No secrets are stored in this project memory.
