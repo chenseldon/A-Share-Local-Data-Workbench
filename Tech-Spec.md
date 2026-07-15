@@ -5,14 +5,6 @@
 - Backend: FastAPI JSON API.
 - Database: DuckDB file at `data/ashare.duckdb` by default. Run the backend from the project root so the local sandbox can write this file.
 - Connectors: Python interfaces returning normalized records with raw payload hashes.
-- Docker: Compose runs a FastAPI backend service and an Nginx frontend service. Nginx serves the built SPA and proxies `/api/*` to `backend:8000`.
-
-## Container Deployment
-- `backend/Dockerfile` builds a Python 3.12 slim runtime and runs Uvicorn on `0.0.0.0:8000`.
-- `frontend/Dockerfile` builds the Vite app with Node and serves `dist` from Nginx.
-- `docker-compose.yml` exposes only the frontend on host port `8080`.
-- `ASHARE_DB_PATH=/data/ashare.duckdb` keeps containerized DuckDB state in the `ashare-data` Docker volume.
-- `ASHARE_DEMO_DATA` defaults to `0`; `.env.docker.example` enables deterministic fixture data for smoke tests.
 
 ## API Contract
 - `GET /api/health`

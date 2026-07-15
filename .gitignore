@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
 .playwright-cli/
@@ -14,7 +13,6 @@ coverage/
 .env
 .env.*
 !.env.example
-!.env.docker.example
 
 data/*.duckdb
 data/*.duckdb.wal
