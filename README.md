@@ -11,6 +11,20 @@ This is not a trading system. It does not place orders, read broker accounts, or
 
 ## Quick Start
 
+One-click local start on Windows:
+
+```powershell
+.\start_workbench.cmd
+```
+
+This starts the FastAPI backend and Vite frontend in separate terminal windows, enables labeled fixture data by default, and opens `http://127.0.0.1:5173`.
+
+To start without fixture rows:
+
+```powershell
+.\start_workbench.cmd -NoDemoData
+```
+
 Backend:
 
 ```bash

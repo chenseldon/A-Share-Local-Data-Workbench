@@ -10,6 +10,7 @@
 - Use DuckDB for the V1 local database because it is lightweight, file-based, and suitable for local research snapshots.
 - Use React + Vite + TypeScript for the workbench UI.
 - Keep all trading actions out of scope.
+- Use `start_workbench.cmd` as the Windows one-click local dev launcher; it starts backend and frontend in separate terminal windows and defaults to labeled fixture data for first-run visibility.
 
 ## Data Notes
 - Public web data sources can fail due to throttling, anti-scraping controls, schema drift, or source outages.

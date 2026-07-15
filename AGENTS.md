@@ -17,6 +17,8 @@ This project is a local A-share financial data workbench for research, data insp
 - Package preference: use `uv` for Python when available; use npm for the Vite frontend unless a lockfile later establishes another package manager.
 
 ## Commands
+- One-click dev start: `.\start_workbench.cmd`
+- One-click dev start without fixtures: `.\start_workbench.cmd -NoDemoData`
 - Backend install: `cd backend && uv sync`
 - Backend dev server: `python -m uvicorn app.main:app --app-dir backend --reload`
 - Backend tests: `cd backend && uv run pytest`
