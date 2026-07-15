@@ -16,6 +16,8 @@ export interface ModuleDefinition {
   description: string;
   status: "configured" | "prepared" | "not_configured";
   tables: string[];
+  sources: string[];
+  planned_fields: string[];
 }
 
 export interface Security {
@@ -42,6 +44,28 @@ export interface MarketBar {
   adjustment: string;
   source: string;
   fetched_at: string;
+}
+
+export interface MarketQuote {
+  symbol: string;
+  price_time: string | null;
+  last_price: number | null;
+  previous_close: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  volume: number | null;
+  amount: number | null;
+  bid1: number | null;
+  ask1: number | null;
+  source: string;
+  fetched_at: string;
+}
+
+export interface ChartBar extends MarketBar {
+  ma5: number | null;
+  ma10: number | null;
+  ma20: number | null;
 }
 
 export interface Fundamental {
@@ -96,6 +120,7 @@ export interface SecurityOverview {
   symbol: string;
   security: Security;
   market: MarketBar | null;
+  quote: MarketQuote | null;
   fundamentals: Fundamental | null;
   announcements: Announcement[];
   reports: ResearchReport[];
@@ -106,6 +131,8 @@ export interface SecurityOverview {
 export interface SearchResponse {
   query: string;
   rows: Security[];
+  remote_status?: FreshnessState | "fetched" | "not_needed";
+  remote_error?: string | null;
 }
 
 export interface ModuleDataResponse {
@@ -138,4 +165,25 @@ export interface SourceHealth {
 
 export interface RowsResponse<T> {
   rows: T[];
+}
+
+export interface QuoteResponse {
+  symbol: string;
+  status: FreshnessState;
+  quote: MarketQuote | null;
+}
+
+export interface ChartResponse {
+  symbol: string;
+  period: string;
+  adjustment: string;
+  status: FreshnessState;
+  rows: ChartBar[];
+}
+
+export interface RefreshResponse {
+  symbol: string;
+  status: FreshnessState;
+  records_written: number;
+  source: string;
 }

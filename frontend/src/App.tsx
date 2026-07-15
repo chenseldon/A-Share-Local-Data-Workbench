@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  fetchSecurityChart,
   fetchJobs,
   fetchModuleData,
   fetchModules,
   fetchSecurityOverview,
   fetchSourceHealth,
+  refreshSecurity,
   searchSecurities
 } from "./api";
 import { ModuleView } from "./components/ModuleView";
@@ -15,6 +17,7 @@ import { TopBar } from "./components/TopBar";
 import { fallbackModules } from "./data/fallbackModules";
 import type {
   DataJob,
+  ChartResponse,
   ModuleDataResponse,
   ModuleDefinition,
   SearchResponse,
@@ -29,6 +32,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown request failure.";
 }
 
+function isCompleteSymbolQuery(value: string): boolean {
+  const query = value.trim().toUpperCase();
+  return /^\d{6}$/.test(query) || /^\d{6}\.(SH|SZ|BJ)$/.test(query);
+}
+
 export default function App() {
   const [modules, setModules] = useState<ModuleDefinition[]>(fallbackModules);
   const [activeView, setActiveView] = useState<ActiveView>("security");
@@ -41,6 +49,10 @@ export default function App() {
   const [overview, setOverview] = useState<SecurityOverviewType | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [chart, setChart] = useState<ChartResponse | null>(null);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartError, setChartError] = useState<string | null>(null);
+  const [marketRefreshing, setMarketRefreshing] = useState(false);
 
   const [moduleData, setModuleData] = useState<ModuleDataResponse | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
@@ -60,6 +72,9 @@ export default function App() {
     fetchModules()
       .then(setModules)
       .catch(() => setModules(fallbackModules));
+    fetchSourceHealth()
+      .then((response) => setSources(response.rows))
+      .catch(() => setSources([]));
   }, []);
 
   useEffect(() => {
@@ -74,6 +89,9 @@ export default function App() {
       .then((response: SearchResponse) => {
         if (!cancelled) {
           setSearchResults(response.rows);
+          if (isCompleteSymbolQuery(query) && response.rows.length === 1) {
+            handleSelectSymbol(response.rows[0].symbol);
+          }
         }
       })
       .catch(() => {
@@ -97,14 +115,23 @@ export default function App() {
       return;
     }
     setOverviewLoading(true);
+    setChartLoading(true);
     setOverviewError(null);
-    fetchSecurityOverview(selectedSymbol)
-      .then(setOverview)
+    setChartError(null);
+    Promise.all([fetchSecurityOverview(selectedSymbol), fetchSecurityChart(selectedSymbol)])
+      .then(([overviewResponse, chartResponse]) => {
+        setOverview(overviewResponse);
+        setChart(chartResponse);
+      })
       .catch((error: unknown) => {
         setOverview(null);
+        setChart(null);
         setOverviewError(errorMessage(error));
       })
-      .finally(() => setOverviewLoading(false));
+      .finally(() => {
+        setOverviewLoading(false);
+        setChartLoading(false);
+      });
   }, [selectedSymbol]);
 
   const loadModule = useCallback(() => {
@@ -170,6 +197,28 @@ export default function App() {
     }
   }
 
+  function refreshMarketData() {
+    if (!selectedSymbol) {
+      return;
+    }
+    setMarketRefreshing(true);
+    setOverviewError(null);
+    setChartError(null);
+    refreshSecurity(selectedSymbol)
+      .then(() => {
+        loadSecurity();
+        if (activeView === "module") {
+          loadModule();
+        }
+      })
+      .catch((error: unknown) => {
+        const message = errorMessage(error);
+        setOverviewError(message);
+        setChartError(message);
+      })
+      .finally(() => setMarketRefreshing(false));
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -182,6 +231,7 @@ export default function App() {
           setActiveView("module");
         }}
         onSelectSystem={() => setActiveView("system")}
+        sourceHealth={sources}
       />
       <main className="workspace">
         <TopBar
@@ -200,6 +250,11 @@ export default function App() {
               loading={overviewLoading}
               error={overviewError}
               selectedSymbol={selectedSymbol}
+              chart={chart}
+              chartLoading={chartLoading}
+              chartError={chartError}
+              onRefreshMarket={refreshMarketData}
+              marketRefreshing={marketRefreshing}
             />
           )}
           {activeView === "module" && (
@@ -209,6 +264,12 @@ export default function App() {
               loading={moduleLoading}
               error={moduleError}
               selectedSymbol={selectedSymbol}
+              chart={chart}
+              chartLoading={chartLoading}
+              chartError={chartError}
+              quote={overview?.quote ?? null}
+              onRefreshMarket={refreshMarketData}
+              marketRefreshing={marketRefreshing}
             />
           )}
           {activeView === "system" && (

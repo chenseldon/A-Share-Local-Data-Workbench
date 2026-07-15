@@ -1,7 +1,8 @@
 import { AlertTriangle, FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
-import type { SecurityOverview as SecurityOverviewType } from "../types";
+import type { ChartResponse, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
+import { KLineChart } from "./KLineChart";
 import { StatusBadge } from "./StatusBadge";
 
 interface SecurityOverviewProps {
@@ -9,6 +10,11 @@ interface SecurityOverviewProps {
   loading: boolean;
   error: string | null;
   selectedSymbol: string;
+  chart: ChartResponse | null;
+  chartLoading: boolean;
+  chartError: string | null;
+  onRefreshMarket: () => void;
+  marketRefreshing: boolean;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -18,7 +24,17 @@ function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-export function SecurityOverview({ overview, loading, error, selectedSymbol }: SecurityOverviewProps) {
+export function SecurityOverview({
+  overview,
+  loading,
+  error,
+  selectedSymbol,
+  chart,
+  chartLoading,
+  chartError,
+  onRefreshMarket,
+  marketRefreshing
+}: SecurityOverviewProps) {
   if (loading) {
     return <div className="panel loading-panel">Loading local security context...</div>;
   }
@@ -56,9 +72,9 @@ export function SecurityOverview({ overview, loading, error, selectedSymbol }: S
       <section className="metric-row">
         <div className="metric-panel">
           <LineChart aria-hidden="true" size={18} />
-          <span>Latest Close</span>
-          <strong>{formatNumber(overview.market?.close)}</strong>
-          <small>{overview.market?.trade_date ?? "No market bar"}</small>
+          <span>Latest Price</span>
+          <strong>{formatNumber(overview.quote?.last_price ?? overview.market?.close)}</strong>
+          <small>{overview.quote?.price_time ?? overview.market?.trade_date ?? "No market data"}</small>
         </div>
         <div className="metric-panel">
           <FileText aria-hidden="true" size={18} />
@@ -87,6 +103,16 @@ export function SecurityOverview({ overview, loading, error, selectedSymbol }: S
         </section>
       )}
 
+      <KLineChart
+        rows={chart?.rows ?? []}
+        quote={overview.quote}
+        status={chart?.status ?? "not_collected"}
+        loading={chartLoading}
+        error={chartError}
+        onRefresh={onRefreshMarket}
+        refreshing={marketRefreshing}
+      />
+
       <section className="panel split-panel">
         <div>
           <h2>Freshness</h2>
@@ -105,8 +131,18 @@ export function SecurityOverview({ overview, loading, error, selectedSymbol }: S
       <section className="panel">
         <div className="section-heading">
           <div>
+            <h2>Latest Quote</h2>
+            <p>Latest cached public-source quote. Refreshing writes to DuckDB before display.</p>
+          </div>
+        </div>
+        <DataTable rows={overview.quote ? [overview.quote] : []} />
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
             <h2>Market Bars</h2>
-            <p>Source and fetch time are shown with each local row.</p>
+            <p>Source, trade date, adjustment and fetch time are shown with each local row.</p>
           </div>
         </div>
         <DataTable rows={overview.market ? [overview.market] : []} />

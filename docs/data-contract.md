@@ -17,3 +17,9 @@ Connector-written rows should preserve:
 
 ## Fixture Semantics
 Rows with `source = local_fixture` are deterministic development fixtures. They are useful for UI and API validation but are not market data.
+
+## Market Refresh API
+- `POST /api/security/{symbol}/refresh` is the only V1.1 endpoint that triggers public-source market fetches and writes them to DuckDB.
+- `GET /api/security/{symbol}/quote` reads the latest cached row from `market_quotes`.
+- `GET /api/security/{symbol}/chart?period=1d&adjustment=none` reads cached daily bars and returns `ma5`, `ma10`, and `ma20`.
+- `GET /api/securities/search?q=...` may remote-resolve only complete six-digit symbols or `SYMBOL.EXCHANGE` inputs; partial search text remains local-only.

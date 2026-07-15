@@ -25,15 +25,17 @@ export function TopBar({
       <div className="search-panel">
         <Search aria-hidden="true" size={18} />
         <input
-          aria-label="Search local securities"
+          aria-label="Search or resolve A-share symbol"
           value={query}
-          placeholder="Search symbol or local security name"
+          placeholder="Search symbol, name, or type 600519"
           onChange={(event) => onQueryChange(event.target.value)}
         />
         {query && (
           <div className="search-results">
-            {isSearching && <div className="search-row muted">Searching local database...</div>}
-            {!isSearching && searchResults.length === 0 && <div className="search-row muted">No local matches.</div>}
+            {isSearching && <div className="search-row muted">Searching cache and public sources...</div>}
+            {!isSearching && searchResults.length === 0 && (
+              <div className="search-row muted">No cached or resolvable match.</div>
+            )}
             {searchResults.map((security) => (
               <button key={security.symbol} className="search-row" onClick={() => onSelectSymbol(security.symbol)}>
                 <span>{security.symbol}</span>

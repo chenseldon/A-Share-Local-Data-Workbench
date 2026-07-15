@@ -36,6 +36,23 @@ CREATE TABLE IF NOT EXISTS market_bars (
   PRIMARY KEY (symbol, trade_date, adjustment, source)
 );
 
+CREATE TABLE IF NOT EXISTS market_quotes (
+  symbol VARCHAR PRIMARY KEY,
+  price_time TIMESTAMP,
+  last_price DOUBLE,
+  previous_close DOUBLE,
+  open DOUBLE,
+  high DOUBLE,
+  low DOUBLE,
+  volume DOUBLE,
+  amount DOUBLE,
+  bid1 DOUBLE,
+  ask1 DOUBLE,
+  source VARCHAR NOT NULL,
+  fetched_at TIMESTAMP NOT NULL,
+  raw_payload_hash VARCHAR NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS fundamentals (
   symbol VARCHAR NOT NULL,
   report_period DATE NOT NULL,

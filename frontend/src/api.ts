@@ -1,7 +1,10 @@
 import type {
+  ChartResponse,
   DataJob,
   ModuleDataResponse,
   ModuleDefinition,
+  QuoteResponse,
+  RefreshResponse,
   RowsResponse,
   SearchResponse,
   SecurityOverview,
@@ -12,6 +15,15 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+async function apiPost<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, { method: "POST" });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `Request failed: ${response.status}`);
@@ -30,6 +42,19 @@ export function searchSecurities(query: string): Promise<SearchResponse> {
 
 export function fetchSecurityOverview(symbol: string): Promise<SecurityOverview> {
   return apiGet<SecurityOverview>(`/api/security/${encodeURIComponent(symbol)}/overview`);
+}
+
+export function refreshSecurity(symbol: string): Promise<RefreshResponse> {
+  return apiPost<RefreshResponse>(`/api/security/${encodeURIComponent(symbol)}/refresh`);
+}
+
+export function fetchSecurityQuote(symbol: string): Promise<QuoteResponse> {
+  return apiGet<QuoteResponse>(`/api/security/${encodeURIComponent(symbol)}/quote`);
+}
+
+export function fetchSecurityChart(symbol: string): Promise<ChartResponse> {
+  const params = new URLSearchParams({ period: "1d", adjustment: "none", limit: "160" });
+  return apiGet<ChartResponse>(`/api/security/${encodeURIComponent(symbol)}/chart?${params.toString()}`);
 }
 
 export function fetchModuleData(moduleId: string, symbol: string | null): Promise<ModuleDataResponse> {

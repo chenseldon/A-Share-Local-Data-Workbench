@@ -1,5 +1,5 @@
 import { Activity, Database, Gauge, Layers, Server } from "lucide-react";
-import type { ModuleDefinition } from "../types";
+import type { ModuleDefinition, SourceHealth } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
 interface SidebarProps {
@@ -9,6 +9,7 @@ interface SidebarProps {
   onSelectSecurity: () => void;
   onSelectModule: (moduleId: string) => void;
   onSelectSystem: () => void;
+  sourceHealth: SourceHealth[];
 }
 
 export function Sidebar({
@@ -17,8 +18,11 @@ export function Sidebar({
   activeModule,
   onSelectSecurity,
   onSelectModule,
-  onSelectSystem
+  onSelectSystem,
+  sourceHealth
 }: SidebarProps) {
+  const healthByModule = new Map(sourceHealth.map((item) => [item.module, item]));
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -58,6 +62,7 @@ export function Sidebar({
             <span className="module-copy">
               <span>{module.label}</span>
               <small>{module.layer}</small>
+              <small>{healthByModule.get(module.id)?.updated_at ?? module.sources[0] ?? "No source"}</small>
             </span>
             <StatusBadge status={module.status} />
           </button>

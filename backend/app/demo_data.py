@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .database import connect
@@ -9,6 +9,45 @@ from .database import connect
 FIXTURE_SOURCE = "local_fixture"
 FETCHED_AT = datetime(2026, 7, 14, 7, 0, 0)
 HASH = "local-fixture-not-market-data"
+
+
+def _fixture_market_bars() -> list[tuple[object, ...]]:
+    configs = {
+        "600519.SH": {"base": 1492.0, "step": 1.25, "volume": 1850000.0, "amount": 2810000000.0, "latest": 1519.2},
+        "300750.SZ": {"base": 186.0, "step": 0.78, "volume": 16000000.0, "amount": 3010000000.0, "latest": 202.7},
+        "688981.SH": {"base": 58.2, "step": 0.25, "volume": 43000000.0, "amount": 2520000000.0, "latest": 63.9},
+    }
+    start = date(2026, 6, 15)
+    rows: list[tuple[object, ...]] = []
+    for symbol, config in configs.items():
+        for index in range(21):
+            trade_date = start + timedelta(days=index)
+            close = float(config["base"]) + index * float(config["step"]) + ((index % 4) - 1.5) * 0.9
+            if index == 20:
+                trade_date = date(2026, 7, 13)
+                close = float(config["latest"])
+            open_price = close - (0.8 if index % 2 == 0 else -0.6)
+            high = max(open_price, close) + 2.4
+            low = min(open_price, close) - 2.1
+            volume = float(config["volume"]) + index * 24500
+            amount = float(config["amount"]) + index * 18000000
+            rows.append(
+                (
+                    symbol,
+                    trade_date.isoformat(),
+                    round(open_price, 2),
+                    round(high, 2),
+                    round(low, 2),
+                    round(close, 2),
+                    round(volume, 2),
+                    round(amount, 2),
+                    "none",
+                    FIXTURE_SOURCE,
+                    FETCHED_AT,
+                    HASH,
+                )
+            )
+    return rows
 
 
 def seed_demo_data(db_path: Path | str | None = None) -> None:
@@ -33,11 +72,7 @@ def seed_demo_data(db_path: Path | str | None = None) -> None:
             (symbol, trade_date, open, high, low, close, volume, amount, adjustment, source, fetched_at, raw_payload_hash)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [
-                ("600519.SH", "2026-07-13", 1510.0, 1528.5, 1498.0, 1519.2, 2145000, 3256000000, "none", FIXTURE_SOURCE, FETCHED_AT, HASH),
-                ("300750.SZ", "2026-07-13", 198.4, 204.8, 197.1, 202.7, 18450000, 3712000000, "none", FIXTURE_SOURCE, FETCHED_AT, HASH),
-                ("688981.SH", "2026-07-13", 62.2, 64.8, 61.4, 63.9, 52100000, 3298000000, "none", FIXTURE_SOURCE, FETCHED_AT, HASH),
-            ],
+            _fixture_market_bars(),
         )
         connection.executemany(
             """

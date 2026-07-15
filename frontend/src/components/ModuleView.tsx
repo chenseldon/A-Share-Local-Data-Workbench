@@ -1,6 +1,8 @@
-import type { ModuleDataResponse, ModuleDefinition } from "../types";
+import { BarChart3, FileText, ListChecks, RadioTower } from "lucide-react";
+import type { ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
+import { KLineChart } from "./KLineChart";
 import { StatusBadge } from "./StatusBadge";
 
 interface ModuleViewProps {
@@ -9,9 +11,34 @@ interface ModuleViewProps {
   loading: boolean;
   error: string | null;
   selectedSymbol: string;
+  chart: ChartResponse | null;
+  chartLoading: boolean;
+  chartError: string | null;
+  quote: MarketQuote | null;
+  onRefreshMarket: () => void;
+  marketRefreshing: boolean;
 }
 
-export function ModuleView({ module, data, loading, error, selectedSymbol }: ModuleViewProps) {
+function moduleEmptyLabel(module: ModuleDefinition, status: string): string {
+  if (status === "not_configured") {
+    return `${module.layer} is mapped in the V3.4.0 architecture, but no connector is enabled yet.`;
+  }
+  return `No cached rows for ${module.layer} yet. Trigger collection or switch to a seeded symbol.`;
+}
+
+export function ModuleView({
+  module,
+  data,
+  loading,
+  error,
+  selectedSymbol,
+  chart,
+  chartLoading,
+  chartError,
+  quote,
+  onRefreshMarket,
+  marketRefreshing
+}: ModuleViewProps) {
   if (!module) {
     return <EmptyState title="Unknown module" detail="Select one of the ten configured navigation modules." />;
   }
@@ -21,15 +48,72 @@ export function ModuleView({ module, data, loading, error, selectedSymbol }: Mod
       <section className="panel hero-panel">
         <div>
           <h1>{module.label}</h1>
-          <p>
-            {module.layer} · {module.description}
-          </p>
+          <p>{module.layer} · {module.description}</p>
         </div>
         <div className="security-meta">
           <span>{selectedSymbol || "All local symbols"}</span>
           <StatusBadge status={module.status} />
         </div>
       </section>
+
+      <section className="module-detail-grid">
+        <div className="panel module-info-card">
+          <RadioTower aria-hidden="true" size={18} />
+          <h2>Sources</h2>
+          <div className="tag-list">
+            {module.sources.map((source) => (
+              <span key={source}>{source}</span>
+            ))}
+          </div>
+        </div>
+        <div className="panel module-info-card">
+          <ListChecks aria-hidden="true" size={18} />
+          <h2>Planned Fields</h2>
+          <div className="tag-list">
+            {module.planned_fields.map((field) => (
+              <span key={field}>{field}</span>
+            ))}
+          </div>
+        </div>
+        <div className="panel module-info-card">
+          <FileText aria-hidden="true" size={18} />
+          <h2>Local Tables</h2>
+          <div className="tag-list">
+            {(module.tables.length ? module.tables : ["No local table yet"]).map((table) => (
+              <span key={table}>{table}</span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {module.id === "market" && (
+        <KLineChart
+          rows={chart?.rows ?? []}
+          quote={quote}
+          status={chart?.status ?? "not_collected"}
+          loading={chartLoading}
+          error={chartError}
+          onRefresh={onRefreshMarket}
+          refreshing={marketRefreshing}
+        />
+      )}
+
+      {module.id === "market" && (
+        <section className="panel module-market-strip">
+          <div className="section-heading">
+            <div>
+              <h2>Market Workspace</h2>
+              <p>Current V1.1 scope: cached public-source quote, daily K-line, MA overlays and local data lineage.</p>
+            </div>
+            <BarChart3 aria-hidden="true" size={20} />
+          </div>
+          <div className="market-placeholders">
+            <span>Five-level order book: placeholder</span>
+            <span>PE/PB/market cap: fundamentals table</span>
+            <span>Index/ETF context: planned connector</span>
+          </div>
+        </section>
+      )}
 
       {loading && <div className="panel loading-panel">Loading local module rows...</div>}
       {error && <EmptyState title="Module request failed" detail={error} />}
@@ -42,14 +126,7 @@ export function ModuleView({ module, data, loading, error, selectedSymbol }: Mod
             </div>
             <StatusBadge status={data.status} />
           </div>
-          <DataTable
-            rows={data.rows}
-            emptyLabel={
-              data.status === "not_configured"
-                ? "This module is in the ten-layer navigation but no connector is configured yet."
-                : "No local data has been collected for this module yet."
-            }
-          />
+          <DataTable rows={data.rows} emptyLabel={moduleEmptyLabel(module, data.status)} />
         </section>
       )}
     </div>

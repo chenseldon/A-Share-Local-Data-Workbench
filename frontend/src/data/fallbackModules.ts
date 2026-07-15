@@ -5,80 +5,100 @@ export const fallbackModules: ModuleDefinition[] = [
     id: "market",
     label: "Market",
     layer: "行情层",
-    description: "K-line, quotes, valuation, index and ETF market context.",
+    description: "K-line with MA5/MA10/MA20, latest quote, order book placeholder, valuation, index and ETF context.",
     status: "configured",
-    tables: ["market_bars"]
+    tables: ["market_bars", "market_quotes"],
+    sources: ["Tencent Finance", "Baidu K-line", "mootdx optional"],
+    planned_fields: ["Daily K-line", "MA5/10/20", "latest quote", "PE/PB/market cap", "index/ETF"]
   },
   {
     id: "reports",
     label: "Research Reports",
     layer: "研报层",
-    description: "Company reports, industry reports, ratings and EPS forecasts.",
+    description: "Company reports, industry reports, ratings, PDF links, consensus EPS and natural-language search.",
     status: "configured",
-    tables: ["reports"]
+    tables: ["reports"],
+    sources: ["Eastmoney reportapi", "10jqka", "iwencai optional"],
+    planned_fields: ["company reports", "industry reports", "ratings", "EPS forecast", "PDF URL"]
   },
   {
     id: "signals",
     label: "Signals",
     layer: "信号层",
-    description: "Themes, northbound flow, rankings and event-driven signals.",
+    description: "Strong stocks, theme attribution, northbound flow, sector ownership, ranking and event-driven signals.",
     status: "not_configured",
-    tables: []
+    tables: [],
+    sources: ["10jqka", "Eastmoney"],
+    planned_fields: ["strong stocks", "themes", "northbound flow", "sector mapping", "dragon tiger list"]
   },
   {
     id: "chip_liquidity",
     label: "Chip And Liquidity",
     layer: "资金面 / 筹码层",
-    description: "Margin financing, block trades, shareholder counts and dividends.",
+    description: "Margin financing, block trades, shareholder counts, dividends and multi-horizon money flow.",
     status: "prepared",
-    tables: ["money_flow"]
+    tables: ["money_flow"],
+    sources: ["Eastmoney datacenter", "Eastmoney push2"],
+    planned_fields: ["margin financing", "block trades", "shareholder counts", "dividends", "120-day money flow"]
   },
   {
     id: "news",
     label: "News",
     layer: "新闻层",
-    description: "Company news, market telegrams and global market context.",
+    description: "Company news, CLS telegrams and global market context with mutually backed sources.",
     status: "not_configured",
-    tables: []
+    tables: [],
+    sources: ["Eastmoney", "CLS"],
+    planned_fields: ["company news", "CLS telegrams", "global information"]
   },
   {
     id: "fundamentals",
     label: "Fundamentals",
     layer: "基础数据",
-    description: "F10, company profile, financial snapshots and statements.",
+    description: "Financial snapshots, F10 company profile and three financial statements.",
     status: "configured",
-    tables: ["fundamentals"]
+    tables: ["fundamentals"],
+    sources: ["mootdx", "Eastmoney", "Sina"],
+    planned_fields: ["37 quarterly fields", "F10 categories", "balance sheet", "income statement", "cash flow"]
   },
   {
     id: "announcements",
     label: "Announcements",
     layer: "公告层",
-    description: "Exchange and CNINFO announcements with PDF links where available.",
+    description: "SSE, SZSE and BSE announcements with CNINFO search and PDF links where available.",
     status: "configured",
-    tables: ["announcements"]
+    tables: ["announcements"],
+    sources: ["CNINFO", "mootdx"],
+    planned_fields: ["announcement title", "published time", "PDF URL", "exchange scope"]
   },
   {
     id: "limit_up",
     label: "Limit-Up Board",
     layer: "打板层",
-    description: "Limit-up, broken-board, down-limit and board-height structure.",
+    description: "Limit-up, broken-board, down-limit, yesterday limit-up, theme reason and board-height structure.",
     status: "prepared",
-    tables: ["limit_up_pool"]
+    tables: ["limit_up_pool"],
+    sources: ["Eastmoney push2ex", "10jqka"],
+    planned_fields: ["limit-up pool", "broken board", "down-limit pool", "limit-up reason", "board height"]
   },
   {
     id: "etf_options",
     label: "ETF Options",
-    layer: "ETF 期权层",
-    description: "Contract chains, T-quotes, Greeks and implied volatility.",
+    layer: "期权层",
+    description: "ETF option chains, T-quotes, Greeks and implied volatility.",
     status: "not_configured",
-    tables: []
+    tables: [],
+    sources: ["Sina hq.sinajs"],
+    planned_fields: ["option chain", "T quote", "Delta", "Gamma", "Theta", "Vega", "IV"]
   },
   {
     id: "sentiment",
     label: "Sentiment",
     layer: "舆情互动层",
-    description: "Interactive Q&A, hot rankings, popularity and concept matches.",
+    description: "Investor Q&A, hot rankings, popularity rankings and concept matches.",
     status: "not_configured",
-    tables: []
+    tables: [],
+    sources: ["CNINFO Hudongyi", "10jqka", "Eastmoney"],
+    planned_fields: ["interactive Q&A", "10jqka hot ranking", "Eastmoney popularity", "concept hit"]
   }
 ];
