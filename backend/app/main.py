@@ -3,12 +3,24 @@ from __future__ import annotations
 import os
 import re
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from .connectors.astock_sources import (
+    AStockSourceError,
+    cninfo_announcements,
+    eastmoney_concept_blocks,
+    eastmoney_reports,
+    eastmoney_stock_info,
+    normalize_eastmoney_report,
+    sina_financial_report,
+    stock_fund_flow_120d,
+)
+from .connectors.capabilities import capability_summary_by_module, list_capabilities
 from .connectors.public_market import MarketDataError, fetch_public_market_snapshot, normalize_symbol
 from .database import get_database_path, initialize_database
 from .demo_data import seed_demo_data
@@ -53,6 +65,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
 
     @app.get("/api/modules")
     def modules() -> list[dict[str, object]]:
+        capability_summary = capability_summary_by_module()
         return [
             {
                 "id": module.id,
@@ -63,9 +76,14 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
                 "tables": list(module.tables),
                 "sources": list(module.sources),
                 "planned_fields": list(module.planned_fields),
+                "capabilities": capability_summary.get(module.id, {}),
             }
             for module in MODULES
         ]
+
+    @app.get("/api/connectors/capabilities")
+    def connector_capabilities() -> dict[str, object]:
+        return {"rows": list_capabilities()}
 
     @app.get("/api/securities/search")
     def search_securities(
@@ -103,6 +121,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     @app.post("/api/security/{symbol}/refresh")
     def refresh_security(
         symbol: str,
+        include_modules: bool = Query(default=False),
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:
         try:
@@ -112,11 +131,13 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         except (ValueError, MarketDataError) as exc:
             repository.record_market_failure("public_market", str(exc))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        optional_results = _refresh_core_modules(repository, normalized_symbol) if include_modules else {}
         return {
             "symbol": normalized_symbol,
             "status": "fresh",
             "records_written": records_written,
             "source": snapshot.security.source,
+            "module_results": optional_results,
         }
 
     @app.get("/api/security/{symbol}/quote")
@@ -158,6 +179,23 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown module: {module_id}")
         return result
 
+    @app.post("/api/modules/{module_id}/refresh")
+    def refresh_module(
+        module_id: str,
+        symbol: str | None = None,
+        repository: DataRepository = Depends(get_repository),
+    ) -> dict[str, object]:
+        if module_id not in {module.id for module in MODULES}:
+            raise HTTPException(status_code=404, detail=f"Unknown module: {module_id}")
+        normalized_symbol = normalize_symbol(symbol) if symbol else None
+        try:
+            result = _refresh_module(repository, module_id, normalized_symbol)
+        except (ValueError, MarketDataError, AStockSourceError) as exc:
+            source = _default_source_for_module(module_id)
+            repository.record_source_failure(module_id, source, str(exc))
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return result
+
     @app.get("/api/jobs")
     def jobs(
         limit: int = Query(default=50, ge=1, le=200),
@@ -173,3 +211,78 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
 
 
 app = create_app()
+
+
+def _refresh_core_modules(repository: DataRepository, symbol: str) -> dict[str, object]:
+    results: dict[str, object] = {}
+    for module_id in ("fundamentals", "reports", "announcements", "signals", "chip_liquidity"):
+        try:
+            results[module_id] = _refresh_module(repository, module_id, symbol)
+        except (AStockSourceError, MarketDataError, ValueError) as exc:
+            repository.record_source_failure(module_id, _default_source_for_module(module_id), str(exc))
+            results[module_id] = {"status": "failed", "error": str(exc)}
+    return results
+
+
+def _refresh_module(repository: DataRepository, module_id: str, symbol: str | None) -> dict[str, object]:
+    if module_id == "market":
+        if not symbol:
+            raise ValueError("Market refresh requires a symbol.")
+        snapshot = fetch_public_market_snapshot(symbol)
+        records_written = repository.save_market_snapshot(snapshot)
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": records_written}
+
+    if module_id == "fundamentals":
+        if not symbol:
+            raise ValueError("Fundamentals refresh requires a symbol.")
+        fetched_at = datetime.now(UTC)
+        info = eastmoney_stock_info(symbol)
+        records_written = repository.save_eastmoney_stock_info(symbol, info, fetched_at)
+        statement_records = []
+        for report_type in ("lrb", "fzb", "llb"):
+            try:
+                statement_records.extend(sina_financial_report(symbol, report_type=report_type, num=4))
+            except AStockSourceError as exc:
+                repository.record_source_failure("fundamentals", f"sina_financial_report:{report_type}", str(exc))
+        records_written += repository.save_module_records(statement_records)
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": records_written}
+
+    if module_id == "reports":
+        if not symbol:
+            raise ValueError("Reports refresh requires a symbol.")
+        fetched_at = datetime.now(UTC)
+        reports = [normalize_eastmoney_report(symbol, record, fetched_at) for record in eastmoney_reports(symbol, max_pages=1)]
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_reports(reports)}
+
+    if module_id == "announcements":
+        if not symbol:
+            raise ValueError("Announcements refresh requires a symbol.")
+        fetched_at = datetime.now(UTC)
+        announcements = cninfo_announcements(symbol, page_size=30)
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_announcements(announcements, fetched_at)}
+
+    if module_id == "signals":
+        if not symbol:
+            raise ValueError("Signals refresh requires a symbol.")
+        records = eastmoney_concept_blocks(symbol)
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_module_records(records)}
+
+    if module_id == "chip_liquidity":
+        if not symbol:
+            raise ValueError("Chip and liquidity refresh requires a symbol.")
+        fetched_at = datetime.now(UTC)
+        rows = stock_fund_flow_120d(symbol)
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_money_flow(rows, fetched_at)}
+
+    return {"module": module_id, "symbol": symbol, "status": "not_configured", "records_written": 0}
+
+
+def _default_source_for_module(module_id: str) -> str:
+    return {
+        "market": "public_market",
+        "fundamentals": "eastmoney_stock_info",
+        "reports": "eastmoney_reports",
+        "announcements": "cninfo_announcements",
+        "signals": "eastmoney_concept_blocks",
+        "chip_liquidity": "stock_fund_flow_120d",
+    }.get(module_id, "not_configured")

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  fetchConnectorCapabilities,
   fetchSecurityChart,
   fetchJobs,
   fetchModuleData,
   fetchModules,
   fetchSecurityOverview,
   fetchSourceHealth,
+  refreshModule,
   refreshSecurity,
   searchSecurities
 } from "./api";
@@ -18,6 +20,7 @@ import { fallbackModules } from "./data/fallbackModules";
 import type {
   DataJob,
   ChartResponse,
+  ConnectorCapability,
   ModuleDataResponse,
   ModuleDefinition,
   SearchResponse,
@@ -53,6 +56,7 @@ export default function App() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
   const [marketRefreshing, setMarketRefreshing] = useState(false);
+  const [moduleRefreshing, setModuleRefreshing] = useState(false);
 
   const [moduleData, setModuleData] = useState<ModuleDataResponse | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
@@ -60,6 +64,7 @@ export default function App() {
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
+  const [capabilities, setCapabilities] = useState<ConnectorCapability[]>([]);
   const [systemLoading, setSystemLoading] = useState(false);
   const [systemError, setSystemError] = useState<string | null>(null);
 
@@ -75,6 +80,9 @@ export default function App() {
     fetchSourceHealth()
       .then((response) => setSources(response.rows))
       .catch(() => setSources([]));
+    fetchConnectorCapabilities()
+      .then((response) => setCapabilities(response.rows))
+      .catch(() => setCapabilities([]));
   }, []);
 
   useEffect(() => {
@@ -149,10 +157,11 @@ export default function App() {
   const loadSystem = useCallback(() => {
     setSystemLoading(true);
     setSystemError(null);
-    Promise.all([fetchSourceHealth(), fetchJobs()])
-      .then(([sourceResponse, jobResponse]) => {
+    Promise.all([fetchSourceHealth(), fetchJobs(), fetchConnectorCapabilities()])
+      .then(([sourceResponse, jobResponse, capabilityResponse]) => {
         setSources(sourceResponse.rows);
         setJobs(jobResponse.rows);
+        setCapabilities(capabilityResponse.rows);
       })
       .catch((error: unknown) => {
         setSources([]);
@@ -219,6 +228,23 @@ export default function App() {
       .finally(() => setMarketRefreshing(false));
   }
 
+  function refreshActiveModule() {
+    if (!activeModule) {
+      return;
+    }
+    setModuleRefreshing(true);
+    setModuleError(null);
+    refreshModule(activeModule, selectedSymbol)
+      .then(() => {
+        loadModule();
+        fetchSourceHealth()
+          .then((response) => setSources(response.rows))
+          .catch(() => setSources([]));
+      })
+      .catch((error: unknown) => setModuleError(errorMessage(error)))
+      .finally(() => setModuleRefreshing(false));
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -269,11 +295,13 @@ export default function App() {
               chartError={chartError}
               quote={overview?.quote ?? null}
               onRefreshMarket={refreshMarketData}
+              onRefreshModule={refreshActiveModule}
               marketRefreshing={marketRefreshing}
+              moduleRefreshing={moduleRefreshing}
             />
           )}
           {activeView === "system" && (
-            <SystemView sources={sources} jobs={jobs} loading={systemLoading} error={systemError} />
+            <SystemView sources={sources} jobs={jobs} capabilities={capabilities} loading={systemLoading} error={systemError} />
           )}
         </div>
       </main>

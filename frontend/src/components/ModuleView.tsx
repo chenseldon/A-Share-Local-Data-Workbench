@@ -1,4 +1,4 @@
-import { BarChart3, FileText, ListChecks, RadioTower } from "lucide-react";
+import { BarChart3, FileText, ListChecks, RadioTower, RefreshCw } from "lucide-react";
 import type { ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
@@ -16,7 +16,9 @@ interface ModuleViewProps {
   chartError: string | null;
   quote: MarketQuote | null;
   onRefreshMarket: () => void;
+  onRefreshModule: () => void;
   marketRefreshing: boolean;
+  moduleRefreshing: boolean;
 }
 
 function moduleEmptyLabel(module: ModuleDefinition, status: string): string {
@@ -37,7 +39,9 @@ export function ModuleView({
   chartError,
   quote,
   onRefreshMarket,
-  marketRefreshing
+  onRefreshModule,
+  marketRefreshing,
+  moduleRefreshing
 }: ModuleViewProps) {
   if (!module) {
     return <EmptyState title="Unknown module" detail="Select one of the ten configured navigation modules." />;
@@ -53,6 +57,10 @@ export function ModuleView({
         <div className="security-meta">
           <span>{selectedSymbol || "All local symbols"}</span>
           <StatusBadge status={module.status} />
+          <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+            <RefreshCw aria-hidden="true" size={14} />
+            {moduleRefreshing ? "Refreshing" : "Refresh module"}
+          </button>
         </div>
       </section>
 
@@ -82,6 +90,19 @@ export function ModuleView({
             {(module.tables.length ? module.tables : ["No local table yet"]).map((table) => (
               <span key={table}>{table}</span>
             ))}
+          </div>
+        </div>
+        <div className="panel module-info-card">
+          <RadioTower aria-hidden="true" size={18} />
+          <h2>Capabilities</h2>
+          <div className="tag-list">
+            {Object.entries(module.capabilities ?? {}).length ? (
+              Object.entries(module.capabilities ?? {}).map(([status, count]) => (
+                <span key={status}>{status.replaceAll("_", " ")}: {count}</span>
+              ))
+            ) : (
+              <span>No registry status</span>
+            )}
           </div>
         </div>
       </section>

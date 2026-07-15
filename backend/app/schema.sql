@@ -48,6 +48,18 @@ CREATE TABLE IF NOT EXISTS market_quotes (
   amount DOUBLE,
   bid1 DOUBLE,
   ask1 DOUBLE,
+  change_amt DOUBLE,
+  change_pct DOUBLE,
+  turnover_pct DOUBLE,
+  pe_ttm DOUBLE,
+  amplitude_pct DOUBLE,
+  total_market_cap DOUBLE,
+  float_market_cap DOUBLE,
+  pb DOUBLE,
+  limit_up DOUBLE,
+  limit_down DOUBLE,
+  volume_ratio DOUBLE,
+  pe_static DOUBLE,
   source VARCHAR NOT NULL,
   fetched_at TIMESTAMP NOT NULL,
   raw_payload_hash VARCHAR NOT NULL
@@ -118,6 +130,18 @@ CREATE TABLE IF NOT EXISTS limit_up_pool (
   fetched_at TIMESTAMP NOT NULL,
   raw_payload_hash VARCHAR NOT NULL,
   PRIMARY KEY (trade_date, symbol, source)
+);
+
+CREATE TABLE IF NOT EXISTS module_records (
+  module VARCHAR NOT NULL,
+  source VARCHAR NOT NULL,
+  data_key VARCHAR NOT NULL,
+  symbol VARCHAR NOT NULL DEFAULT '',
+  record_date DATE,
+  payload_json JSON NOT NULL,
+  fetched_at TIMESTAMP NOT NULL,
+  raw_payload_hash VARCHAR NOT NULL,
+  PRIMARY KEY (module, source, data_key, symbol)
 );
 
 CREATE TABLE IF NOT EXISTS data_jobs (

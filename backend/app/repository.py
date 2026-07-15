@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from .database import connect, initialize_database
+from .connectors.astock_sources import ModuleRecord, payload_hash
 from .connectors.public_market import MarketSnapshot
 from .modules import MODULE_BY_ID
 
@@ -57,8 +59,10 @@ class DataRepository:
                 connection.execute(
                     """
                     INSERT OR REPLACE INTO market_quotes
-                    (symbol, price_time, last_price, previous_close, open, high, low, volume, amount, bid1, ask1, source, fetched_at, raw_payload_hash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (symbol, price_time, last_price, previous_close, open, high, low, volume, amount, bid1, ask1,
+                     change_amt, change_pct, turnover_pct, pe_ttm, amplitude_pct, total_market_cap, float_market_cap,
+                     pb, limit_up, limit_down, volume_ratio, pe_static, source, fetched_at, raw_payload_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         snapshot.quote.symbol,
@@ -72,6 +76,18 @@ class DataRepository:
                         snapshot.quote.amount,
                         snapshot.quote.bid1,
                         snapshot.quote.ask1,
+                        snapshot.quote.change_amt,
+                        snapshot.quote.change_pct,
+                        snapshot.quote.turnover_pct,
+                        snapshot.quote.pe_ttm,
+                        snapshot.quote.amplitude_pct,
+                        snapshot.quote.total_market_cap,
+                        snapshot.quote.float_market_cap,
+                        snapshot.quote.pb,
+                        snapshot.quote.limit_up,
+                        snapshot.quote.limit_down,
+                        snapshot.quote.volume_ratio,
+                        snapshot.quote.pe_static,
                         snapshot.quote.source,
                         snapshot.quote.fetched_at,
                         snapshot.quote.raw_payload_hash,
@@ -120,9 +136,9 @@ class DataRepository:
                     """
                     INSERT OR REPLACE INTO source_health
                     (source, module, status, last_success_at, last_failure_at, last_error, updated_at)
-                    VALUES ('tencent_kline', 'market', 'fresh', ?, NULL, NULL, ?)
+                    VALUES (?, 'market', 'fresh', ?, NULL, NULL, ?)
                     """,
-                    (finished_at, finished_at),
+                    (snapshot.bars[0].source, finished_at, finished_at),
                 )
             connection.execute(
                 """
@@ -136,7 +152,176 @@ class DataRepository:
         finally:
             connection.close()
 
+    def save_eastmoney_stock_info(self, symbol: str, info: dict[str, Any], fetched_at: datetime) -> int:
+        normalized_symbol = symbol.upper()
+        connection = connect(self.db_path)
+        records_written = 0
+        try:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO securities
+                (symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at)
+                VALUES (?, ?, ?, 'stock', ?, ?, true, 'eastmoney_stock_info', ?)
+                """,
+                (
+                    normalized_symbol,
+                    info.get("name") or normalized_symbol,
+                    "SSE" if normalized_symbol.endswith(".SH") else ("BSE" if normalized_symbol.endswith(".BJ") else "SZSE"),
+                    info.get("list_date"),
+                    info.get("industry"),
+                    fetched_at,
+                ),
+            )
+            records_written += 1
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO fundamentals
+                (symbol, report_period, eps, roe, net_profit, revenue, total_market_cap, pe_ttm, pb, source, fetched_at, raw_payload_hash)
+                VALUES (?, ?, NULL, NULL, NULL, NULL, ?, NULL, NULL, 'eastmoney_stock_info', ?, ?)
+                """,
+                (
+                    normalized_symbol,
+                    fetched_at.date().isoformat(),
+                    info.get("mcap"),
+                    fetched_at,
+                    payload_hash(info),
+                ),
+            )
+            records_written += 1
+            self._record_success(connection, "fundamentals", "eastmoney_stock_info", records_written)
+            return records_written
+        finally:
+            connection.close()
+
+    def save_reports(self, reports: list[dict[str, Any]]) -> int:
+        if not reports:
+            return 0
+        connection = connect(self.db_path)
+        try:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO reports
+                (id, symbol, title, institution, analyst, rating, report_date, eps_forecast, url, source, fetched_at, raw_payload_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        row["id"],
+                        row["symbol"],
+                        row["title"],
+                        row.get("institution"),
+                        row.get("analyst"),
+                        row.get("rating"),
+                        row["report_date"],
+                        row.get("eps_forecast"),
+                        row.get("url"),
+                        row["source"],
+                        row["fetched_at"],
+                        row["raw_payload_hash"],
+                    )
+                    for row in reports
+                ],
+            )
+            self._record_success(connection, "reports", "eastmoney_reports", len(reports))
+            return len(reports)
+        finally:
+            connection.close()
+
+    def save_announcements(self, announcements: list[dict[str, Any]], fetched_at: datetime) -> int:
+        if not announcements:
+            return 0
+        connection = connect(self.db_path)
+        try:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO announcements
+                (id, symbol, title, published_at, url, source, fetched_at, raw_payload_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        row["id"],
+                        row["symbol"],
+                        row["title"],
+                        row["published_at"],
+                        row.get("url"),
+                        row["source"],
+                        fetched_at,
+                        row["raw_payload_hash"],
+                    )
+                    for row in announcements
+                ],
+            )
+            self._record_success(connection, "announcements", "cninfo_announcements", len(announcements))
+            return len(announcements)
+        finally:
+            connection.close()
+
+    def save_money_flow(self, rows: list[dict[str, Any]], fetched_at: datetime) -> int:
+        if not rows:
+            return 0
+        connection = connect(self.db_path)
+        try:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO money_flow
+                (symbol, trade_date, main_net_inflow, retail_net_inflow, turnover_rate, source, fetched_at, raw_payload_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        row["symbol"],
+                        row["trade_date"],
+                        row.get("main_net_inflow"),
+                        row.get("retail_net_inflow"),
+                        row.get("turnover_rate"),
+                        row["source"],
+                        fetched_at,
+                        row["raw_payload_hash"],
+                    )
+                    for row in rows
+                ],
+            )
+            self._record_success(connection, "chip_liquidity", "stock_fund_flow_120d", len(rows))
+            return len(rows)
+        finally:
+            connection.close()
+
+    def save_module_records(self, records: list[ModuleRecord]) -> int:
+        if not records:
+            return 0
+        connection = connect(self.db_path)
+        try:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO module_records
+                (module, source, data_key, symbol, record_date, payload_json, fetched_at, raw_payload_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        record.module,
+                        record.source,
+                        record.data_key,
+                        record.symbol or "",
+                        record.record_date,
+                        json_dumps(record.payload),
+                        record.fetched_at,
+                        record.raw_payload_hash,
+                    )
+                    for record in records
+                ],
+            )
+            for module, source in {(record.module, record.source) for record in records}:
+                self._record_success(connection, module, source, len([record for record in records if record.module == module and record.source == source]))
+            return len(records)
+        finally:
+            connection.close()
+
     def record_market_failure(self, source: str, error_message: str) -> None:
+        self.record_source_failure("market", source, error_message)
+
+    def record_source_failure(self, module: str, source: str, error_message: str) -> None:
         now = datetime.now(UTC)
         connection = connect(self.db_path)
         try:
@@ -144,17 +329,17 @@ class DataRepository:
                 """
                 INSERT OR REPLACE INTO source_health
                 (source, module, status, last_success_at, last_failure_at, last_error, updated_at)
-                VALUES (?, 'market', 'failed', NULL, ?, ?, ?)
+                VALUES (?, ?, 'failed', NULL, ?, ?, ?)
                 """,
-                (source, now, error_message[:500], now),
+                (source, module, now, error_message[:500], now),
             )
             connection.execute(
                 """
                 INSERT OR REPLACE INTO data_jobs
                 (id, job_type, module, source, status, started_at, finished_at, records_written, error_message)
-                VALUES (?, 'refresh', 'market', ?, 'failed', ?, ?, 0, ?)
+                VALUES (?, 'refresh', ?, ?, 'failed', ?, ?, 0, ?)
                 """,
-                (str(uuid4()), source, now, now, error_message[:500]),
+                (str(uuid4()), module, source, now, now, error_message[:500]),
             )
         finally:
             connection.close()
@@ -207,7 +392,9 @@ class DataRepository:
     def latest_market_quote(self, symbol: str) -> dict[str, Any] | None:
         return self._fetch_one(
             """
-            SELECT symbol, price_time, last_price, previous_close, open, high, low, volume, amount, bid1, ask1, source, fetched_at
+            SELECT symbol, price_time, last_price, previous_close, open, high, low, volume, amount, bid1, ask1,
+                   change_amt, change_pct, turnover_pct, pe_ttm, amplitude_pct, total_market_cap, float_market_cap,
+                   pb, limit_up, limit_down, volume_ratio, pe_static, source, fetched_at
             FROM market_quotes
             WHERE upper(symbol) = ?
             """,
@@ -340,8 +527,12 @@ class DataRepository:
             rows = self.list_reports(symbol, limit)
         elif module_id == "chip_liquidity":
             rows = self.list_money_flow(symbol, limit)
+        elif module_id == "signals":
+            rows = self._list_module_records("signals", symbol, limit)
         elif module_id == "limit_up":
             rows = self._list_limit_up(symbol, limit)
+        elif module_id in {"news", "etf_options", "sentiment"}:
+            rows = self._list_module_records(module_id, symbol, limit)
         else:
             rows = []
         status = "ok" if rows else ("not_collected" if module.status != "not_configured" else "not_configured")
@@ -433,6 +624,50 @@ class DataRepository:
             """
         )
 
+    def _record_success(self, connection: Any, module: str, source: str, records_written: int) -> None:
+        now = datetime.now(UTC)
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO source_health
+            (source, module, status, last_success_at, last_failure_at, last_error, updated_at)
+            VALUES (?, ?, 'fresh', ?, NULL, NULL, ?)
+            """,
+            (source, module, now, now),
+        )
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO data_jobs
+            (id, job_type, module, source, status, started_at, finished_at, records_written, error_message)
+            VALUES (?, 'refresh', ?, ?, 'success', ?, ?, ?, NULL)
+            """,
+            (str(uuid4()), module, source, now, now, records_written),
+        )
+
+    def _list_module_records(self, module_id: str, symbol: str | None, limit: int) -> list[dict[str, Any]]:
+        if symbol:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = ? AND upper(coalesce(symbol, '')) = ?
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (module_id, symbol.upper(), limit),
+            )
+        else:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = ?
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (module_id, limit),
+            )
+        return [_flatten_module_record(row) for row in rows]
+
     def security_freshness(self, symbol: str) -> dict[str, str]:
         checks = {
             "market": self._latest_market_bar(symbol),
@@ -455,3 +690,21 @@ def _moving_average(values: list[float | None], window: int) -> float | None:
     if any(value is None for value in sample):
         return None
     return round(sum(value for value in sample if value is not None) / window, 4)
+
+
+def json_dumps(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _flatten_module_record(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.pop("payload_json", None)
+    if isinstance(payload, str):
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            parsed = {"payload": payload}
+    elif isinstance(payload, dict):
+        parsed = payload
+    else:
+        parsed = {"payload": payload}
+    return {**row, **parsed}

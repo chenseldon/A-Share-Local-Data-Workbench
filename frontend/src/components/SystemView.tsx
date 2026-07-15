@@ -1,16 +1,17 @@
 import { ServerCog } from "lucide-react";
-import type { DataJob, SourceHealth } from "../types";
+import type { ConnectorCapability, DataJob, SourceHealth } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 
 interface SystemViewProps {
   sources: SourceHealth[];
   jobs: DataJob[];
+  capabilities: ConnectorCapability[];
   loading: boolean;
   error: string | null;
 }
 
-export function SystemView({ sources, jobs, loading, error }: SystemViewProps) {
+export function SystemView({ sources, jobs, capabilities, loading, error }: SystemViewProps) {
   if (loading) {
     return <div className="panel loading-panel">Loading system state...</div>;
   }
@@ -29,6 +30,16 @@ export function SystemView({ sources, jobs, loading, error }: SystemViewProps) {
         <div className="system-glyph">
           <ServerCog aria-hidden="true" size={28} />
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h2>Connector Registry</h2>
+            <p>a-stock-data V3.4.0 function map with wired, planned, needs-key and optional dependency states.</p>
+          </div>
+        </div>
+        <DataTable rows={capabilities} emptyLabel="Connector capability registry is unavailable." />
       </section>
 
       <section className="panel">

@@ -64,6 +64,48 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
         assert len(search.json()["rows"]) == 4
 
 
+def test_capabilities_registry_is_exposed(tmp_path: Path) -> None:
+    db_path = tmp_path / "capabilities.duckdb"
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/connectors/capabilities")
+        assert response.status_code == 200
+        rows = response.json()["rows"]
+        assert any(row["function"] == "tencent_quote" and row["status"] == "wired" for row in rows)
+        assert any(row["function"] == "iwencai_search" and row["status"] == "needs_key" for row in rows)
+
+
+def test_module_refresh_reports_uses_connector_and_cache(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "module-refresh.duckdb"
+
+    def fake_reports(symbol: str, max_pages: int = 1) -> list[dict[str, object]]:
+        assert symbol == "600519.SH"
+        assert max_pages == 1
+        return [
+            {
+                "infoCode": "123456",
+                "title": "Mock report",
+                "publishDate": "2026-07-15 08:00:00",
+                "orgSName": "Mock Securities",
+                "emRatingName": "Buy",
+                "predictThisYearEps": "10.0",
+            }
+        ]
+
+    monkeypatch.setattr("app.main.eastmoney_reports", fake_reports)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/reports/refresh?symbol=600519.SH")
+        assert refresh.status_code == 200
+        assert refresh.json()["records_written"] == 1
+
+        data = client.get("/api/modules/reports/data?symbol=600519.SH")
+        assert data.status_code == 200
+        payload = data.json()
+        assert payload["status"] == "ok"
+        assert payload["rows"][0]["title"] == "Mock report"
+
+
 def test_symbol_normalization() -> None:
     assert normalize_symbol("600519") == "600519.SH"
     assert normalize_symbol("000001") == "000001.SZ"

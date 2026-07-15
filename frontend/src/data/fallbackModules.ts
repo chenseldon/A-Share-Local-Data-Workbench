@@ -9,7 +9,8 @@ export const fallbackModules: ModuleDefinition[] = [
     status: "configured",
     tables: ["market_bars", "market_quotes"],
     sources: ["Tencent Finance", "Baidu K-line", "mootdx optional"],
-    planned_fields: ["Daily K-line", "MA5/10/20", "latest quote", "PE/PB/market cap", "index/ETF"]
+    planned_fields: ["Daily K-line", "MA5/10/20", "latest quote", "PE/PB/market cap", "index/ETF"],
+    capabilities: { wired: 2, optional_dependency_missing: 2 }
   },
   {
     id: "reports",
@@ -19,27 +20,30 @@ export const fallbackModules: ModuleDefinition[] = [
     status: "configured",
     tables: ["reports"],
     sources: ["Eastmoney reportapi", "10jqka", "iwencai optional"],
-    planned_fields: ["company reports", "industry reports", "ratings", "EPS forecast", "PDF URL"]
+    planned_fields: ["company reports", "industry reports", "ratings", "EPS forecast", "PDF URL"],
+    capabilities: { wired: 1, planned: 2, needs_key: 1, optional_dependency_missing: 1 }
   },
   {
     id: "signals",
     label: "Signals",
     layer: "信号层",
     description: "Strong stocks, theme attribution, northbound flow, sector ownership, ranking and event-driven signals.",
-    status: "not_configured",
-    tables: [],
+    status: "prepared",
+    tables: ["module_records"],
     sources: ["10jqka", "Eastmoney"],
-    planned_fields: ["strong stocks", "themes", "northbound flow", "sector mapping", "dragon tiger list"]
+    planned_fields: ["strong stocks", "themes", "northbound flow", "sector mapping", "dragon tiger list"],
+    capabilities: { wired: 1, planned: 7 }
   },
   {
     id: "chip_liquidity",
     label: "Chip And Liquidity",
     layer: "资金面 / 筹码层",
     description: "Margin financing, block trades, shareholder counts, dividends and multi-horizon money flow.",
-    status: "prepared",
+    status: "configured",
     tables: ["money_flow"],
     sources: ["Eastmoney datacenter", "Eastmoney push2"],
-    planned_fields: ["margin financing", "block trades", "shareholder counts", "dividends", "120-day money flow"]
+    planned_fields: ["margin financing", "block trades", "shareholder counts", "dividends", "120-day money flow"],
+    capabilities: { wired: 1, planned: 4 }
   },
   {
     id: "news",
@@ -49,7 +53,8 @@ export const fallbackModules: ModuleDefinition[] = [
     status: "not_configured",
     tables: [],
     sources: ["Eastmoney", "CLS"],
-    planned_fields: ["company news", "CLS telegrams", "global information"]
+    planned_fields: ["company news", "CLS telegrams", "global information"],
+    capabilities: { planned: 3 }
   },
   {
     id: "fundamentals",
@@ -57,9 +62,10 @@ export const fallbackModules: ModuleDefinition[] = [
     layer: "基础数据",
     description: "Financial snapshots, F10 company profile and three financial statements.",
     status: "configured",
-    tables: ["fundamentals"],
-    sources: ["mootdx", "Eastmoney", "Sina"],
-    planned_fields: ["37 quarterly fields", "F10 categories", "balance sheet", "income statement", "cash flow"]
+    tables: ["fundamentals", "module_records"],
+    sources: ["mootdx optional", "Eastmoney", "Sina"],
+    planned_fields: ["37 quarterly fields", "F10 categories", "balance sheet", "income statement", "cash flow"],
+    capabilities: { wired: 2, optional_dependency_missing: 1 }
   },
   {
     id: "announcements",
@@ -68,8 +74,9 @@ export const fallbackModules: ModuleDefinition[] = [
     description: "SSE, SZSE and BSE announcements with CNINFO search and PDF links where available.",
     status: "configured",
     tables: ["announcements"],
-    sources: ["CNINFO", "mootdx"],
-    planned_fields: ["announcement title", "published time", "PDF URL", "exchange scope"]
+    sources: ["CNINFO", "mootdx optional"],
+    planned_fields: ["announcement title", "published time", "PDF URL", "exchange scope"],
+    capabilities: { wired: 1, optional_dependency_missing: 1 }
   },
   {
     id: "limit_up",
@@ -79,7 +86,8 @@ export const fallbackModules: ModuleDefinition[] = [
     status: "prepared",
     tables: ["limit_up_pool"],
     sources: ["Eastmoney push2ex", "10jqka"],
-    planned_fields: ["limit-up pool", "broken board", "down-limit pool", "limit-up reason", "board height"]
+    planned_fields: ["limit-up pool", "broken board", "down-limit pool", "limit-up reason", "board height"],
+    capabilities: { planned: 6 }
   },
   {
     id: "etf_options",
@@ -89,7 +97,8 @@ export const fallbackModules: ModuleDefinition[] = [
     status: "not_configured",
     tables: [],
     sources: ["Sina hq.sinajs"],
-    planned_fields: ["option chain", "T quote", "Delta", "Gamma", "Theta", "Vega", "IV"]
+    planned_fields: ["option chain", "T quote", "Delta", "Gamma", "Theta", "Vega", "IV"],
+    capabilities: { planned: 3 }
   },
   {
     id: "sentiment",
@@ -99,6 +108,7 @@ export const fallbackModules: ModuleDefinition[] = [
     status: "not_configured",
     tables: [],
     sources: ["CNINFO Hudongyi", "10jqka", "Eastmoney"],
-    planned_fields: ["interactive Q&A", "10jqka hot ranking", "Eastmoney popularity", "concept hit"]
+    planned_fields: ["interactive Q&A", "10jqka hot ranking", "Eastmoney popularity", "concept hit"],
+    capabilities: { planned: 4 }
   }
 ];

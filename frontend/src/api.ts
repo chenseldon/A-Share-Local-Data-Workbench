@@ -1,5 +1,6 @@
 import type {
   ChartResponse,
+  ConnectorCapability,
   DataJob,
   ModuleDataResponse,
   ModuleDefinition,
@@ -44,8 +45,22 @@ export function fetchSecurityOverview(symbol: string): Promise<SecurityOverview>
   return apiGet<SecurityOverview>(`/api/security/${encodeURIComponent(symbol)}/overview`);
 }
 
-export function refreshSecurity(symbol: string): Promise<RefreshResponse> {
-  return apiPost<RefreshResponse>(`/api/security/${encodeURIComponent(symbol)}/refresh`);
+export function refreshSecurity(symbol: string, includeModules = true): Promise<RefreshResponse> {
+  const params = new URLSearchParams({ include_modules: includeModules ? "true" : "false" });
+  return apiPost<RefreshResponse>(`/api/security/${encodeURIComponent(symbol)}/refresh?${params.toString()}`);
+}
+
+export function refreshModule(moduleId: string, symbol: string | null): Promise<RefreshResponse> {
+  const params = new URLSearchParams();
+  if (symbol) {
+    params.set("symbol", symbol);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiPost<RefreshResponse>(`/api/modules/${encodeURIComponent(moduleId)}/refresh${suffix}`);
+}
+
+export function fetchConnectorCapabilities(): Promise<RowsResponse<ConnectorCapability>> {
+  return apiGet<RowsResponse<ConnectorCapability>>("/api/connectors/capabilities");
 }
 
 export function fetchSecurityQuote(symbol: string): Promise<QuoteResponse> {

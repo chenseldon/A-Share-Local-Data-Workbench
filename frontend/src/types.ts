@@ -18,6 +18,19 @@ export interface ModuleDefinition {
   tables: string[];
   sources: string[];
   planned_fields: string[];
+  capabilities?: Record<string, number>;
+}
+
+export interface ConnectorCapability {
+  module: string;
+  function: string;
+  source: string;
+  description: string;
+  status: FreshnessState | "wired" | "planned" | "needs_key" | "optional_dependency_missing";
+  requires_key: boolean;
+  optional_dependency: string | null;
+  note: string | null;
+  checked_at: string;
 }
 
 export interface Security {
@@ -182,8 +195,10 @@ export interface ChartResponse {
 }
 
 export interface RefreshResponse {
-  symbol: string;
+  symbol?: string;
+  module?: string;
   status: FreshnessState;
   records_written: number;
-  source: string;
+  source?: string;
+  module_results?: Record<string, unknown>;
 }

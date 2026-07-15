@@ -64,11 +64,20 @@ Fixture rows are marked with `source = local_fixture` and are not current market
 ## API
 - `GET /api/health`
 - `GET /api/modules`
+- `GET /api/connectors/capabilities`
 - `GET /api/securities/search`
 - `GET /api/security/{symbol}/overview`
+- `POST /api/security/{symbol}/refresh`
+- `GET /api/security/{symbol}/quote`
+- `GET /api/security/{symbol}/chart`
 - `GET /api/modules/{module}/data`
+- `POST /api/modules/{module}/refresh`
 - `GET /api/jobs`
 - `GET /api/data-sources/status`
+
+## a-stock-data Alignment
+
+The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stock-data`. It is not imported as an application package. Selected read-only functions are ported into backend connectors and tracked through `GET /api/connectors/capabilities`.
 
 ## Data Safety
 - `trade_date` and `fetched_at` are separate fields.

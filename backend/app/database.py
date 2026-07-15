@@ -29,5 +29,28 @@ def initialize_database(db_path: Path | str | None = None) -> None:
     connection = connect(db_path)
     try:
         connection.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+        _apply_lightweight_migrations(connection)
     finally:
         connection.close()
+
+
+def _apply_lightweight_migrations(connection: duckdb.DuckDBPyConnection) -> None:
+    quote_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info('market_quotes')").fetchall()
+    }
+    for column, column_type in {
+        "change_amt": "DOUBLE",
+        "change_pct": "DOUBLE",
+        "turnover_pct": "DOUBLE",
+        "pe_ttm": "DOUBLE",
+        "amplitude_pct": "DOUBLE",
+        "total_market_cap": "DOUBLE",
+        "float_market_cap": "DOUBLE",
+        "pb": "DOUBLE",
+        "limit_up": "DOUBLE",
+        "limit_down": "DOUBLE",
+        "volume_ratio": "DOUBLE",
+        "pe_static": "DOUBLE",
+    }.items():
+        if column not in quote_columns:
+            connection.execute(f"ALTER TABLE market_quotes ADD COLUMN {column} {column_type}")

@@ -42,6 +42,18 @@ class MarketQuote:
     source: str
     fetched_at: datetime
     raw_payload_hash: str
+    change_amt: float | None = None
+    change_pct: float | None = None
+    turnover_pct: float | None = None
+    pe_ttm: float | None = None
+    amplitude_pct: float | None = None
+    total_market_cap: float | None = None
+    float_market_cap: float | None = None
+    pb: float | None = None
+    limit_up: float | None = None
+    limit_down: float | None = None
+    volume_ratio: float | None = None
+    pe_static: float | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +182,18 @@ def fetch_tencent_quote(symbol: str, client: httpx.Client | None = None) -> tupl
         amount=_to_float(parts[37] if len(parts) > 37 else None),
         bid1=_to_float(parts[9] if len(parts) > 9 else None),
         ask1=_to_float(parts[19] if len(parts) > 19 else None),
+        change_amt=_to_float(parts[31] if len(parts) > 31 else None),
+        change_pct=_to_float(parts[32] if len(parts) > 32 else None),
+        turnover_pct=_to_float(parts[38] if len(parts) > 38 else None),
+        pe_ttm=_to_float(parts[39] if len(parts) > 39 else None),
+        amplitude_pct=_to_float(parts[43] if len(parts) > 43 else None),
+        total_market_cap=_to_float(parts[44] if len(parts) > 44 else None),
+        float_market_cap=_to_float(parts[45] if len(parts) > 45 else None),
+        pb=_to_float(parts[46] if len(parts) > 46 else None),
+        limit_up=_to_float(parts[47] if len(parts) > 47 else None),
+        limit_down=_to_float(parts[48] if len(parts) > 48 else None),
+        volume_ratio=_to_float(parts[49] if len(parts) > 49 else None),
+        pe_static=_to_float(parts[52] if len(parts) > 52 else None),
         source="tencent_quote",
         fetched_at=fetched_at,
         raw_payload_hash=payload_hash,
@@ -225,10 +249,80 @@ def fetch_tencent_daily_bars(symbol: str, limit: int = 120, client: httpx.Client
     return tuple(bars)
 
 
+def fetch_baidu_daily_bars(symbol: str, limit: int = 160, client: httpx.Client | None = None) -> tuple[MarketBar, ...]:
+    normalized = normalize_symbol(symbol)
+    fetched_at = datetime.now(UTC)
+    owns_client = client is None
+    http_client = client or httpx.Client(
+        timeout=10.0,
+        headers={
+            "Accept": "application/vnd.finance-web.v1+json",
+            "Origin": "https://gushitong.baidu.com",
+            "Referer": "https://gushitong.baidu.com/",
+            "User-Agent": "Mozilla/5.0",
+        },
+    )
+    try:
+        response = http_client.get(
+            "https://finance.pae.baidu.com/selfselect/getstockquotation",
+            params={
+                "group": "quotation_kline_ab",
+                "finClientType": "pc",
+                "code": normalized,
+                "ktype": "1",
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise MarketDataError(f"Baidu K-line request failed: {exc}") from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+    result = payload.get("Result") or payload.get("result") or {}
+    market_data = result.get("newMarketData") or result.get("marketData") or {}
+    keys = market_data.get("keys") or result.get("keys") or []
+    rows = market_data.get("marketData") or market_data.get("data") or result.get("marketData") or []
+    if not isinstance(keys, list) or not isinstance(rows, list):
+        raise MarketDataError(f"Baidu K-line response is not usable for {normalized}")
+
+    bars: list[MarketBar] = []
+    for raw_row in rows[-limit:]:
+        values = str(raw_row).split(";")
+        row = dict(zip((str(key).lower() for key in keys), values, strict=False))
+        trade_date = row.get("date") or row.get("time")
+        if not trade_date:
+            continue
+        raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        bars.append(
+            MarketBar(
+                symbol=normalized,
+                trade_date=str(trade_date)[:10],
+                open=_to_float(row.get("open")),
+                high=_to_float(row.get("high")),
+                low=_to_float(row.get("low")),
+                close=_to_float(row.get("close")),
+                volume=_to_float(row.get("volume")),
+                amount=_to_float(row.get("amount")),
+                adjustment="none",
+                source="baidu_kline_with_ma",
+                fetched_at=fetched_at,
+                raw_payload_hash=_hash_payload(raw),
+            )
+        )
+    if not bars:
+        raise MarketDataError(f"Baidu K-line returned no rows for {normalized}")
+    return tuple(bars)
+
+
 def fetch_public_market_snapshot(symbol: str) -> MarketSnapshot:
     security, quote = fetch_tencent_quote(symbol)
     try:
-        bars = fetch_tencent_daily_bars(symbol)
+        bars = fetch_baidu_daily_bars(symbol)
     except MarketDataError:
-        bars = ()
+        try:
+            bars = fetch_tencent_daily_bars(symbol)
+        except MarketDataError:
+            bars = ()
     return MarketSnapshot(security=security, quote=quote, bars=bars)

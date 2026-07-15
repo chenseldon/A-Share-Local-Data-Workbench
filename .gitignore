@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .playwright-cli/
+tmp_pytest/
 
 node_modules/
 dist/
@@ -19,6 +20,8 @@ data/*.duckdb
 data/*.duckdb.wal
 data/raw/
 data/cache/
+
+a-stock-data-main/
 
 *.log
 .DS_Store
