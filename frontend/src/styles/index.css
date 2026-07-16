@@ -186,7 +186,7 @@ button {
 
 .workspace {
   min-width: 0;
-  width: 100%;
+  width: calc(100vw - 292px);
   margin-left: 292px;
   overflow-x: hidden;
 }
@@ -871,6 +871,7 @@ tr:last-child td {
   }
 
   .workspace {
+    width: 100%;
     margin-left: 0;
   }
 

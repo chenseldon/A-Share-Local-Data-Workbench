@@ -17,7 +17,7 @@ One-click local start on Windows:
 .\start_workbench.cmd
 ```
 
-This starts the FastAPI backend and Vite frontend in separate terminal windows, does not seed fixture data by default, and opens `http://127.0.0.1:5173`.
+This starts the FastAPI backend and Vite frontend in separate terminal windows, does not seed fixture data by default, clears old `local_fixture` rows, and opens `http://127.0.0.1:5173`.
 
 To start with labeled fixture rows:
 
@@ -82,6 +82,8 @@ The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stoc
 ## Local free-stockdb K-line
 
 Daily K-line data is read from local `free-stockdb` when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is installed in the backend Python environment. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Tencent remains a latest quote and valuation source; K-line chart rows do not fall back to Tencent/Baidu example data.
+
+Security search resolves complete six-digit codes directly from free-stockdb. Chinese name searches first use the local securities cache; when empty, the backend preloads a bounded representative free-stockdb directory so common names can be found without scanning the entire database.
 
 ## Data Safety
 - `trade_date` and `fetched_at` are separate fields.

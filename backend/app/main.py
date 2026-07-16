@@ -21,7 +21,13 @@ from .connectors.astock_sources import (
     stock_fund_flow_120d,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
-from .connectors.public_market import MarketDataError, fetch_free_stockdb_security, fetch_public_market_snapshot, normalize_symbol
+from .connectors.public_market import (
+    MarketDataError,
+    fetch_free_stockdb_security,
+    fetch_free_stockdb_security_batch,
+    fetch_public_market_snapshot,
+    normalize_symbol,
+)
 from .database import get_database_path, initialize_database
 from .demo_data import seed_demo_data
 from .modules import MODULES
@@ -33,6 +39,10 @@ def should_remote_resolve(query: str) -> bool:
     return bool(re.fullmatch(r"\d{6}|\d{6}\.(SH|SZ|BJ)", value))
 
 
+def should_preload_security_directory(query: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", query.strip()))
+
+
 def create_app(db_path: Path | str | None = None) -> FastAPI:
     resolved_db_path = db_path or get_database_path()
 
@@ -41,6 +51,8 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         initialize_database(resolved_db_path)
         if os.getenv("ASHARE_DEMO_DATA", "").lower() in {"1", "true", "yes"}:
             seed_demo_data(resolved_db_path)
+        else:
+            DataRepository(resolved_db_path).delete_fixture_data()
         yield
 
     app = FastAPI(title="A-Share Local Data Workbench API", version="0.1.0", lifespan=lifespan)
@@ -106,6 +118,15 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
                 remote_status = "failed"
                 remote_error = str(exc)
                 repository.record_market_failure("free_stockdb_security", str(exc))
+        if remote and not rows and should_preload_security_directory(q):
+            try:
+                records_written = repository.save_securities(fetch_free_stockdb_security_batch())
+                rows = repository.search_securities(q, limit)
+                remote_status = "preloaded" if rows else ("preload_empty" if records_written else "not_collected")
+            except MarketDataError as exc:
+                remote_status = "failed"
+                remote_error = str(exc)
+                repository.record_market_failure("free_stockdb_security_preload", str(exc))
         return {"query": q, "rows": rows, "remote_status": remote_status, "remote_error": remote_error}
 
     @app.get("/api/security/{symbol}/overview")

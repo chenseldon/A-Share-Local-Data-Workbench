@@ -55,6 +55,57 @@ class DataRepository:
         finally:
             connection.close()
 
+    def save_securities(self, securities: tuple[ResolvedSecurity, ...]) -> int:
+        if not securities:
+            return 0
+        connection = connect(self.db_path)
+        try:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO securities
+                (symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at)
+                VALUES (?, ?, ?, ?, NULL, ?, true, ?, ?)
+                """,
+                [
+                    (
+                        security.symbol,
+                        security.name,
+                        security.exchange,
+                        security.asset_type,
+                        security.sector,
+                        security.source,
+                        security.fetched_at,
+                    )
+                    for security in securities
+                ],
+            )
+            return len(securities)
+        finally:
+            connection.close()
+
+    def delete_fixture_data(self) -> int:
+        connection = connect(self.db_path)
+        tables = (
+            "securities",
+            "market_quotes",
+            "market_bars",
+            "fundamentals",
+            "announcements",
+            "reports",
+            "money_flow",
+            "limit_up_pool",
+            "module_records",
+            "source_health",
+        )
+        deleted = 0
+        try:
+            for table in tables:
+                deleted += int(connection.execute(f"SELECT count(*) FROM {table} WHERE source = 'local_fixture'").fetchone()[0])
+                connection.execute(f"DELETE FROM {table} WHERE source = 'local_fixture'")
+            return deleted
+        finally:
+            connection.close()
+
     def save_market_snapshot(self, snapshot: MarketSnapshot) -> int:
         connection = connect(self.db_path)
         records_written = 0

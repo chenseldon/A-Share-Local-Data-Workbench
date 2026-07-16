@@ -18,11 +18,13 @@ Connector-written rows should preserve:
 ## Fixture Semantics
 Rows with `source = local_fixture` are deterministic development fixtures. They are useful for UI and API validation but are not market data.
 
+Default startup clears old `local_fixture` rows. Fixture rows are inserted only when `ASHARE_DEMO_DATA=1` or `.\start_workbench.cmd -DemoData` is used.
+
 ## Market Refresh API
 - `POST /api/security/{symbol}/refresh` is the only V1.1 endpoint that triggers public-source market fetches and writes them to DuckDB.
 - `GET /api/security/{symbol}/quote` reads the latest cached row from `market_quotes`.
 - `GET /api/security/{symbol}/chart?period=1d&adjustment=auto` reads cached daily bars and returns `ma5`, `ma10`, and `ma20`; `auto` prefers local free-stockdb `qfq`, then falls back only to other locally cached adjustments.
-- `GET /api/securities/search?q=...` may resolve only complete six-digit symbols or `SYMBOL.EXCHANGE` inputs through local free-stockdb; partial code/name search remains local-cache-only.
+- `GET /api/securities/search?q=...` resolves complete six-digit symbols or `SYMBOL.EXCHANGE` inputs through local free-stockdb. Chinese name queries may trigger a bounded representative free-stockdb security preload before searching local cache again; partial numeric search remains local-cache-only.
 
 ## a-stock-data Alignment API
 - `GET /api/connectors/capabilities` returns the V3.4.0 connector registry and distinguishes `wired`, `planned`, `needs_key`, and `optional_dependency_missing`.

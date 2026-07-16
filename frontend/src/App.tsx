@@ -30,6 +30,7 @@ import type {
 } from "./types";
 
 type ActiveView = "security" | "module" | "system";
+const backgroundRefreshModules = ["fundamentals", "announcements", "reports", "signals", "chip_liquidity"];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown request failure.";
@@ -199,8 +200,7 @@ export default function App() {
     setChartLoading(true);
     setOverviewError(null);
     setChartError(null);
-    refreshSecurity(symbol, true)
-      .then(() => Promise.all([fetchSecurityOverview(symbol), fetchSecurityChart(symbol)]))
+    Promise.all([fetchSecurityOverview(symbol), fetchSecurityChart(symbol)])
       .then(([overviewResponse, chartResponse]) => {
         setOverview(overviewResponse);
         setChart(chartResponse);
@@ -215,6 +215,16 @@ export default function App() {
         setChartLoading(false);
         setMarketRefreshing(false);
       });
+    void refreshSecurity(symbol)
+      .then(() => Promise.all([fetchSecurityOverview(symbol), fetchSecurityChart(symbol)]))
+      .then(([overviewResponse, chartResponse]) => {
+        setOverview(overviewResponse);
+        setChart(chartResponse);
+      })
+      .then(() => Promise.allSettled(backgroundRefreshModules.map((moduleId) => refreshModule(moduleId, symbol))))
+      .then(() => fetchSecurityOverview(symbol))
+      .then(setOverview)
+      .catch(() => undefined);
   }
 
   function refreshCurrentView() {

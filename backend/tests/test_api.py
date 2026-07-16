@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.connectors.public_market import MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
+from app.database import initialize_database
 from app.demo_data import seed_demo_data
 from app.main import create_app
 
@@ -64,6 +65,17 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
         assert len(search.json()["rows"]) == 4
 
 
+def test_default_startup_removes_fixture_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "purge-fixtures.duckdb"
+    initialize_database(db_path)
+    seed_demo_data(db_path)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        search = client.get("/api/securities/search?remote=false")
+        assert search.status_code == 200
+        assert search.json()["rows"] == []
+
+
 def test_capabilities_registry_is_exposed(tmp_path: Path) -> None:
     db_path = tmp_path / "capabilities.duckdb"
     app = create_app(db_path)
@@ -115,16 +127,48 @@ def test_symbol_normalization() -> None:
 def test_partial_search_does_not_remote_resolve(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "partial.duckdb"
 
-    def fail_remote(_: str) -> MarketSnapshot:
-        raise AssertionError("partial query should not call remote connector")
+    def fake_batch() -> tuple[ResolvedSecurity, ...]:
+        return ()
 
-    monkeypatch.setattr("app.main.fetch_public_market_snapshot", fail_remote)
+    def fail_exact(_: str) -> ResolvedSecurity:
+        raise AssertionError("partial query should not call exact connector")
+
+    monkeypatch.setattr("app.main.fetch_free_stockdb_security_batch", fake_batch)
+    monkeypatch.setattr("app.main.fetch_free_stockdb_security", fail_exact)
     app = create_app(db_path)
     with TestClient(app) as client:
         search = client.get("/api/securities/search?q=60")
         assert search.status_code == 200
         assert search.json()["rows"] == []
         assert search.json()["remote_status"] == "not_needed"
+
+
+def test_name_search_preloads_free_stockdb_directory(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "name-search.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_batch() -> tuple[ResolvedSecurity, ...]:
+        return (
+            ResolvedSecurity(
+                symbol="600519.SH",
+                name="\u8d35\u5dde\u8305\u53f0",
+                exchange="SSE",
+                asset_type="stock",
+                sector=None,
+                source="free_stockdb_security_preload",
+                fetched_at=fetched_at,
+                raw_payload_hash="security-hash",
+            ),
+        )
+
+    monkeypatch.setattr("app.main.fetch_free_stockdb_security_batch", fake_batch)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        search = client.get("/api/securities/search?q=\u8305\u53f0")
+        assert search.status_code == 200
+        payload = search.json()
+        assert payload["remote_status"] == "preloaded"
+        assert payload["rows"][0]["symbol"] == "600519.SH"
 
 
 def test_complete_search_resolves_with_free_stockdb_security(tmp_path: Path, monkeypatch) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +13,107 @@ import httpx
 
 class MarketDataError(RuntimeError):
     pass
+
+
+FREE_STOCKDB_PRESET_CODES: tuple[str, ...] = (
+    "000001",
+    "000002",
+    "000063",
+    "000100",
+    "000333",
+    "000651",
+    "000725",
+    "000858",
+    "002027",
+    "002142",
+    "002230",
+    "002415",
+    "002466",
+    "002594",
+    "002714",
+    "002812",
+    "300014",
+    "300015",
+    "300033",
+    "300059",
+    "300122",
+    "300274",
+    "300308",
+    "300347",
+    "300750",
+    "300760",
+    "300896",
+    "510050",
+    "510300",
+    "510500",
+    "512100",
+    "512480",
+    "512880",
+    "513050",
+    "588000",
+    "588080",
+    "600000",
+    "600002",
+    "600009",
+    "600010",
+    "600016",
+    "600028",
+    "600030",
+    "600031",
+    "600036",
+    "600048",
+    "600050",
+    "600104",
+    "600111",
+    "600150",
+    "600276",
+    "600309",
+    "600438",
+    "600519",
+    "600547",
+    "600570",
+    "600585",
+    "600690",
+    "600703",
+    "600745",
+    "600809",
+    "600887",
+    "601012",
+    "601088",
+    "601166",
+    "601318",
+    "601328",
+    "601390",
+    "601398",
+    "601601",
+    "601628",
+    "601668",
+    "601688",
+    "601728",
+    "601788",
+    "601857",
+    "601888",
+    "601899",
+    "601939",
+    "601988",
+    "601989",
+    "603019",
+    "603259",
+    "603288",
+    "603501",
+    "603799",
+    "603986",
+    "605499",
+    "688012",
+    "688036",
+    "688111",
+    "688126",
+    "688169",
+    "688256",
+    "688363",
+    "688599",
+    "920001",
+)
 
 
 @dataclass(frozen=True)
@@ -134,7 +236,7 @@ def fetch_free_stockdb_security(symbol: str) -> ResolvedSecurity:
             fields=fields,
             fq="qfq",
             as_df=False,
-            limit=1,
+            limit=len(codes),
             desc=True,
         )
     except Exception as exc:
@@ -154,6 +256,68 @@ def fetch_free_stockdb_security(symbol: str) -> ResolvedSecurity:
         fetched_at=fetched_at,
         raw_payload_hash=_hash_payload(raw),
     )
+
+
+def fetch_free_stockdb_security_batch(codes: tuple[str, ...] = FREE_STOCKDB_PRESET_CODES) -> tuple[ResolvedSecurity, ...]:
+    if not _tcp_port_open("127.0.0.1", 7899, timeout=0.2):
+        return ()
+    fetched_at = datetime.now(UTC)
+    fields = "date,code,name,close"
+    try:
+        from stock_sdk import StockDBClient
+    except ImportError as exc:
+        raise MarketDataError("free-stockdb Python SDK is not installed in this Python environment.") from exc
+    try:
+        client = StockDBClient(host="127.0.0.1", port=7899)
+        rows = client.get_data(
+            code=list(codes),
+            frequency="1d",
+            fields=fields,
+            fq="qfq",
+            as_df=False,
+            limit=1,
+            desc=True,
+        )
+    except Exception as exc:
+        raise MarketDataError(f"free-stockdb security preload failed: {exc}") from exc
+
+    securities: list[ResolvedSecurity] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            raw_code = row.get("code")
+            name = row.get("name")
+        elif isinstance(row, (list, tuple)) and len(row) > 2:
+            raw_code = row[1]
+            name = row[2]
+        else:
+            continue
+        code = str(raw_code).strip().upper().split(".")[0].zfill(6)
+        try:
+            normalized = normalize_symbol(code)
+        except ValueError:
+            continue
+        raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
+        securities.append(
+            ResolvedSecurity(
+                symbol=normalized,
+                name=str(name) if name else normalized,
+                exchange=exchange_name(normalized),
+                asset_type=infer_asset_type(normalized),
+                sector=None,
+                source="free_stockdb_security_preload",
+                fetched_at=fetched_at,
+                raw_payload_hash=_hash_payload(raw),
+            )
+        )
+    return tuple(securities)
+
+
+def _tcp_port_open(host: str, port: int, *, timeout: float) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _hash_payload(payload: str) -> str:

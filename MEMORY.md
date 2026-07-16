@@ -20,10 +20,10 @@
 - Public web data sources can fail due to throttling, anti-scraping controls, schema drift, or source outages.
 - All external data should be represented with `source`, `fetched_at`, and freshness state.
 - Demo fixtures are allowed only for development and testing, and must be labeled as fixtures.
-- Demo market bars remain available only under `-DemoData`; they are labeled `local_fixture` and are not current market data.
+- Demo market bars remain available only under `-DemoData`; they are labeled `local_fixture` and are not current market data. Default startup purges existing `local_fixture` rows so old demo rows do not leak into normal use.
 - Tencent quote fields include valuation and limit fields, but chart K-line rows are read only from local free-stockdb instead of Tencent/Baidu fallbacks.
-- free-stockdb integration expects `stockdb.exe` on `127.0.0.1:7899` and `stock_sdk` installed in the backend Python environment. K-line rows are stored as `source=free_stockdb_kline` and `adjustment=qfq`; exact code searches can resolve securities from the latest local free-stockdb K-line row.
-- Confirming a symbol in the search box triggers a market refresh plus best-effort fundamentals, announcements, reports, concept and fund-flow refreshes; module failures are recorded and shown instead of blocking the market chart.
+- free-stockdb integration expects `stockdb.exe` on `127.0.0.1:7899` and `stock_sdk` installed in the backend Python environment. K-line rows are stored as `source=free_stockdb_kline` and `adjustment=qfq`; exact code searches can resolve securities from the latest local free-stockdb K-line row. Chinese name search uses local cache first and may trigger a bounded representative free-stockdb directory preload.
+- Confirming a symbol in the search box renders cached/empty local context first, then refreshes market data and best-effort fundamentals, announcements, reports, concept and fund-flow data in the background; slow sources must not block the main Security View.
 
 ## Secrets
 - No secrets are stored in this project memory.
