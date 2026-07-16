@@ -20,8 +20,9 @@ class ConnectorCapability:
 
 _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("market", "free_stockdb_kline", "free-stockdb local SDK", "Local daily K-line data from stockdb.exe on 127.0.0.1:7899.", "wired"),
+    ConnectorCapability("market", "free_stockdb_security", "free-stockdb local SDK", "Resolve complete code searches from the latest local K-line row.", "wired"),
     ConnectorCapability("market", "tencent_quote", "Tencent Finance", "Latest quote, valuation and limit fields.", "wired"),
-    ConnectorCapability("market", "baidu_kline_with_ma", "Baidu K-line", "Daily K-line with MA5/MA10/MA20 source fields.", "wired"),
+    ConnectorCapability("market", "baidu_kline_with_ma", "Baidu K-line", "Disabled as a chart source; retained only as a reference connector.", "planned"),
     ConnectorCapability("market", "mootdx_bars", "mootdx", "TDX K-line and multi-period bars.", "optional_dependency_missing", optional_dependency="mootdx"),
     ConnectorCapability("market", "mootdx_quotes", "mootdx", "Five-level quotes and transaction snapshots.", "optional_dependency_missing", optional_dependency="mootdx"),
     ConnectorCapability("reports", "eastmoney_reports", "Eastmoney reportapi", "Company research reports and PDF URL metadata.", "wired"),

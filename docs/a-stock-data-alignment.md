@@ -4,7 +4,7 @@
 
 ## Source Priority
 
-- Market data: free-stockdb local K-line is wired first for daily bars. Tencent quote remains the latest quote/valuation source; Baidu and Tencent K-line are fallbacks. `mootdx` is tracked as an optional dependency.
+- Market data: free-stockdb local K-line is the only wired chart source for daily bars. Tencent quote remains the latest quote/valuation source; Baidu/Tencent K-line fallbacks are disabled for charts. `mootdx` is tracked as an optional dependency.
 - Eastmoney: used for reportapi, stock profile, concept ownership and fund-flow endpoints. Calls go through a throttled helper.
 - CNINFO: used for announcement search with dynamic `orgId` lookup and fallback rules.
 - Sina: used for financial-statement records through the open API endpoint.
@@ -15,8 +15,8 @@
 | Layer | Upstream function | Local behavior |
 | --- | --- | --- |
 | Market | `free_stockdb_kline` | Writes local `stockdb.exe` daily K-line rows into `market_bars` as `adjustment=qfq`. |
+| Market | `free_stockdb_security` | Resolves complete six-digit code searches from the latest local free-stockdb K-line row and writes `securities`. |
 | Market | `tencent_quote` | Writes latest quote and valuation fields into `market_quotes`. |
-| Market | `baidu_kline_with_ma` | Fallback public K-line source; the API returns MA5/10/20 from cached closes. |
 | Reports | `eastmoney_reports` | Writes company report metadata and PDF URLs into `reports`. |
 | Signals | `eastmoney_concept_blocks` | Writes block ownership rows into `module_records`. |
 | Chip/Liquidity | `stock_fund_flow_120d` | Writes daily fund-flow rows into `money_flow`. |

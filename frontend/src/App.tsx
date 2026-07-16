@@ -194,6 +194,27 @@ export default function App() {
     setQuery("");
     setSearchResults([]);
     setActiveView("security");
+    setMarketRefreshing(true);
+    setOverviewLoading(true);
+    setChartLoading(true);
+    setOverviewError(null);
+    setChartError(null);
+    refreshSecurity(symbol, true)
+      .then(() => Promise.all([fetchSecurityOverview(symbol), fetchSecurityChart(symbol)]))
+      .then(([overviewResponse, chartResponse]) => {
+        setOverview(overviewResponse);
+        setChart(chartResponse);
+      })
+      .catch((error: unknown) => {
+        const message = errorMessage(error);
+        setOverviewError(message);
+        setChartError(message);
+      })
+      .finally(() => {
+        setOverviewLoading(false);
+        setChartLoading(false);
+        setMarketRefreshing(false);
+      });
   }
 
   function refreshCurrentView() {

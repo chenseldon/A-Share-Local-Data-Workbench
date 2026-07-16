@@ -18,7 +18,7 @@ This project is a local A-share financial data workbench for research, data insp
 
 ## Commands
 - One-click dev start: `.\start_workbench.cmd`
-- One-click dev start without fixtures: `.\start_workbench.cmd -NoDemoData`
+- One-click dev start with labeled fixtures: `.\start_workbench.cmd -DemoData`
 - Backend install: `cd backend && uv sync`
 - Backend dev server: `python -m uvicorn app.main:app --app-dir backend --reload`
 - Backend tests: `cd backend && uv run pytest`

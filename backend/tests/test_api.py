@@ -127,6 +127,34 @@ def test_partial_search_does_not_remote_resolve(tmp_path: Path, monkeypatch) -> 
         assert search.json()["remote_status"] == "not_needed"
 
 
+def test_complete_search_resolves_with_free_stockdb_security(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "remote-search.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_free_stockdb_security(symbol: str) -> ResolvedSecurity:
+        assert symbol == "600519.SH"
+        return ResolvedSecurity(
+            symbol="600519.SH",
+            name="贵州茅台",
+            exchange="SSE",
+            asset_type="stock",
+            sector=None,
+            source="free_stockdb_security",
+            fetched_at=fetched_at,
+            raw_payload_hash="security-hash",
+        )
+
+    monkeypatch.setattr("app.main.fetch_free_stockdb_security", fake_free_stockdb_security)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        search = client.get("/api/securities/search?q=600519")
+        assert search.status_code == 200
+        payload = search.json()
+        assert payload["remote_status"] == "fetched"
+        assert payload["rows"][0]["symbol"] == "600519.SH"
+        assert payload["rows"][0]["name"] == "贵州茅台"
+
+
 def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "refresh.duckdb"
     fetched_at = datetime(2026, 7, 15, 10, 30, 0)
@@ -170,7 +198,7 @@ def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None
                 volume=1000 + day,
                 amount=100000 + day,
                 adjustment="none",
-                source="tencent_kline",
+                source="free_stockdb_kline",
                 fetched_at=fetched_at,
                 raw_payload_hash=f"bar-{day}",
             )

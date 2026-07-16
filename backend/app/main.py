@@ -21,7 +21,7 @@ from .connectors.astock_sources import (
     stock_fund_flow_120d,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
-from .connectors.public_market import MarketDataError, fetch_public_market_snapshot, normalize_symbol
+from .connectors.public_market import MarketDataError, fetch_free_stockdb_security, fetch_public_market_snapshot, normalize_symbol
 from .database import get_database_path, initialize_database
 from .demo_data import seed_demo_data
 from .modules import MODULES
@@ -98,14 +98,14 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         if remote and not rows and should_remote_resolve(q):
             try:
                 normalized_symbol = normalize_symbol(q)
-                snapshot = fetch_public_market_snapshot(normalized_symbol)
-                repository.save_market_snapshot(snapshot)
+                security = fetch_free_stockdb_security(normalized_symbol)
+                repository.save_security(security)
                 rows = repository.search_securities(normalized_symbol, limit)
                 remote_status = "fetched" if rows else "not_collected"
             except (ValueError, MarketDataError) as exc:
                 remote_status = "failed"
                 remote_error = str(exc)
-                repository.record_market_failure("public_market", str(exc))
+                repository.record_market_failure("free_stockdb_security", str(exc))
         return {"query": q, "rows": rows, "remote_status": remote_status, "remote_error": remote_error}
 
     @app.get("/api/security/{symbol}/overview")

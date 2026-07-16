@@ -152,7 +152,7 @@ export function SecurityOverview({
         <div className="section-heading">
           <div>
             <h2>Fundamentals</h2>
-            <p>Financial snapshot and valuation fields from local storage.</p>
+            <p>Fetched on confirmed symbol refresh when the upstream connector is available.</p>
           </div>
         </div>
         <DataTable rows={overview.fundamentals ? [overview.fundamentals] : []} />
@@ -162,7 +162,7 @@ export function SecurityOverview({
         <div className="section-heading">
           <div>
             <h2>Announcements</h2>
-            <p>Announcement titles and publication timestamps.</p>
+            <p>Fetched on confirmed symbol refresh; unavailable upstream data is shown as an empty state.</p>
           </div>
         </div>
         <DataTable rows={overview.announcements} />
@@ -172,7 +172,7 @@ export function SecurityOverview({
         <div className="section-heading">
           <div>
             <h2>Research Reports</h2>
-            <p>Report metadata and rating context from local storage.</p>
+            <p>Fetched on confirmed symbol refresh; results keep source and fetch timestamp fields.</p>
           </div>
         </div>
         <DataTable rows={overview.reports} />

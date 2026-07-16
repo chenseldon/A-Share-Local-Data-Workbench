@@ -1,5 +1,5 @@
 param(
-    [switch]$NoDemoData,
+    [switch]$DemoData,
     [switch]$NoOpen,
     [switch]$CheckOnly
 )
@@ -10,7 +10,7 @@ $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
 $BackendPort = 8000
 $FrontendPort = 5173
-$DemoData = if ($NoDemoData) { "0" } else { "1" }
+$DemoDataEnabled = if ($DemoData) { "1" } else { "0" }
 
 function Test-CommandAvailable {
     param([string]$CommandName)
@@ -76,12 +76,12 @@ if (-not (Test-Path (Join-Path $FrontendRoot "node_modules"))) {
 }
 
 if ($CheckOnly) {
-    Write-Host "Check complete. Backend port: $BackendPort; frontend port: $FrontendPort; demo data: $DemoData"
+    Write-Host "Check complete. Backend port: $BackendPort; frontend port: $FrontendPort; demo data: $DemoDataEnabled"
     exit 0
 }
 
 $backendCommand = @"
-`$env:ASHARE_DEMO_DATA = '$DemoData'
+`$env:ASHARE_DEMO_DATA = '$DemoDataEnabled'
 Set-Location '$ProjectRoot'
 python -m uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port $BackendPort
 "@
@@ -121,7 +121,7 @@ Start-Sleep -Seconds 3
 
 $url = "http://127.0.0.1:$FrontendPort"
 Write-Host "Open: $url" -ForegroundColor Green
-Write-Host "Demo data enabled: $DemoData"
+Write-Host "Demo data enabled: $DemoDataEnabled"
 
 if (-not $NoOpen) {
     Start-Process $url

@@ -117,6 +117,45 @@ def infer_asset_type(symbol: str) -> str:
     return "stock"
 
 
+def fetch_free_stockdb_security(symbol: str) -> ResolvedSecurity:
+    normalized = normalize_symbol(symbol)
+    code = stockdb_code(normalized)
+    fetched_at = datetime.now(UTC)
+    fields = "date,code,name,close"
+    try:
+        from stock_sdk import StockDBClient
+    except ImportError as exc:
+        raise MarketDataError("free-stockdb Python SDK is not installed in this Python environment.") from exc
+    try:
+        client = StockDBClient(host="127.0.0.1", port=7899)
+        rows = client.get_data(
+            code=code,
+            frequency="1d",
+            fields=fields,
+            fq="qfq",
+            as_df=False,
+            limit=1,
+            desc=True,
+        )
+    except Exception as exc:
+        raise MarketDataError(f"free-stockdb security lookup failed: {exc}") from exc
+    if not rows:
+        raise MarketDataError(f"free-stockdb has no daily K-line row for {normalized}")
+    row = rows[0]
+    name = str(row[2]) if isinstance(row, (list, tuple)) and len(row) > 2 and row[2] else normalized
+    raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
+    return ResolvedSecurity(
+        symbol=normalized,
+        name=name,
+        exchange=exchange_name(normalized),
+        asset_type=infer_asset_type(normalized),
+        sector=None,
+        source="free_stockdb_security",
+        fetched_at=fetched_at,
+        raw_payload_hash=_hash_payload(raw),
+    )
+
+
 def _hash_payload(payload: str) -> str:
     return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
 
@@ -416,15 +455,16 @@ def _format_stockdb_date(value: Any) -> str | None:
 
 
 def fetch_public_market_snapshot(symbol: str) -> MarketSnapshot:
-    security, quote = fetch_tencent_quote(symbol)
+    try:
+        security = fetch_free_stockdb_security(symbol)
+    except MarketDataError:
+        security, _ = fetch_tencent_quote(symbol)
+    try:
+        _, quote = fetch_tencent_quote(symbol)
+    except MarketDataError:
+        quote = None
     try:
         bars = fetch_free_stockdb_daily_bars(symbol)
     except MarketDataError:
-        try:
-            bars = fetch_baidu_daily_bars(symbol)
-        except MarketDataError:
-            try:
-                bars = fetch_tencent_daily_bars(symbol)
-            except MarketDataError:
-                bars = ()
+        bars = ()
     return MarketSnapshot(security=security, quote=quote, bars=bars)

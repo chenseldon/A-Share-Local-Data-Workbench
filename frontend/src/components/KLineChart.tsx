@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BarChart3, Crosshair, MousePointer2, Ruler, Settings2, TrendingUp } from "lucide-react";
 import {
   CandlestickSeries,
   ColorType,
@@ -19,19 +20,25 @@ interface KLineChartProps {
   refreshing?: boolean;
 }
 
+const indicatorNames = ["MA5", "MA10", "MA20", "Volume"] as const;
+
 function sourceLabel(rows: ChartBar[], quote: MarketQuote | null): string {
+  const latest = rows.at(-1);
+  if (latest) {
+    return `${latest.source} · ${latest.fetched_at} · adjustment ${latest.adjustment}`;
+  }
   if (quote) {
     return `${quote.source} · ${quote.fetched_at}`;
   }
-  const latest = rows.at(-1);
-  if (latest) {
-    return `${latest.source} · ${latest.fetched_at}`;
-  }
-  return "No cached market source";
+  return "No cached free-stockdb K-line source";
 }
 
 export function KLineChart({ rows, quote, status, loading, error, onRefresh, refreshing }: KLineChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
+  const [enabledIndicators, setEnabledIndicators] = useState<Set<string>>(
+    () => new Set(["MA5", "MA10", "MA20", "Volume"])
+  );
   const chartRows = useMemo(
     () =>
       rows.filter(
@@ -44,6 +51,22 @@ export function KLineChart({ rows, quote, status, loading, error, onRefresh, ref
       ),
     [rows]
   );
+
+  function indicatorEnabled(name: string): boolean {
+    return enabledIndicators.has(name);
+  }
+
+  function toggleIndicator(name: string) {
+    setEnabledIndicators((current) => {
+      const next = new Set(current);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     const container = containerRef.current;
@@ -85,41 +108,74 @@ export function KLineChart({ rows, quote, status, loading, error, onRefresh, ref
       }))
     );
 
-    const volume = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "",
-      color: "rgba(96, 165, 250, 0.35)"
-    });
-    volume.priceScale().applyOptions({
-      scaleMargins: { top: 0.82, bottom: 0 }
-    });
-    volume.setData(
-      chartRows.map((row) => ({
-        time: row.trade_date,
-        value: row.volume ?? 0,
-        color: (row.close ?? 0) >= (row.open ?? 0) ? "rgba(239, 68, 68, 0.38)" : "rgba(34, 197, 94, 0.38)"
-      }))
-    );
+    if (indicatorEnabled("Volume")) {
+      const volume = chart.addSeries(HistogramSeries, {
+        priceFormat: { type: "volume" },
+        priceScaleId: "",
+        color: "rgba(96, 165, 250, 0.35)"
+      });
+      volume.priceScale().applyOptions({
+        scaleMargins: { top: 0.82, bottom: 0 }
+      });
+      volume.setData(
+        chartRows.map((row) => ({
+          time: row.trade_date,
+          value: row.volume ?? 0,
+          color: (row.close ?? 0) >= (row.open ?? 0) ? "rgba(239, 68, 68, 0.38)" : "rgba(34, 197, 94, 0.38)"
+        }))
+      );
+    }
 
-    const ma5 = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 1, priceLineVisible: false });
-    const ma10 = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 1, priceLineVisible: false });
-    const ma20 = chart.addSeries(LineSeries, { color: "#c084fc", lineWidth: 1, priceLineVisible: false });
-    ma5.setData(chartRows.filter((row) => row.ma5 !== null).map((row) => ({ time: row.trade_date, value: row.ma5 ?? 0 })));
-    ma10.setData(chartRows.filter((row) => row.ma10 !== null).map((row) => ({ time: row.trade_date, value: row.ma10 ?? 0 })));
-    ma20.setData(chartRows.filter((row) => row.ma20 !== null).map((row) => ({ time: row.trade_date, value: row.ma20 ?? 0 })));
+    if (indicatorEnabled("MA5")) {
+      const ma5 = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 1, priceLineVisible: false });
+      ma5.setData(chartRows.filter((row) => row.ma5 !== null).map((row) => ({ time: row.trade_date, value: row.ma5 ?? 0 })));
+    }
+    if (indicatorEnabled("MA10")) {
+      const ma10 = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 1, priceLineVisible: false });
+      ma10.setData(chartRows.filter((row) => row.ma10 !== null).map((row) => ({ time: row.trade_date, value: row.ma10 ?? 0 })));
+    }
+    if (indicatorEnabled("MA20")) {
+      const ma20 = chart.addSeries(LineSeries, { color: "#c084fc", lineWidth: 1, priceLineVisible: false });
+      ma20.setData(chartRows.filter((row) => row.ma20 !== null).map((row) => ({ time: row.trade_date, value: row.ma20 ?? 0 })));
+    }
 
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [chartRows]);
+  }, [chartRows, enabledIndicators]);
 
   return (
     <section className="panel chart-panel">
       <div className="section-heading chart-heading">
         <div>
           <h2>K-Line</h2>
-          <p>{sourceLabel(rows, quote)} · adjustment none · public-source fetch is not trading-grade real time.</p>
+          <p>{sourceLabel(rows, quote)} · public-source quote is not trading-grade real time.</p>
         </div>
         <div className="chart-actions">
+          <div className="indicator-menu-wrap">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setIndicatorMenuOpen((open) => !open)}
+              aria-expanded={indicatorMenuOpen}
+            >
+              <Settings2 aria-hidden="true" size={15} />
+              Indicators
+            </button>
+            {indicatorMenuOpen && (
+              <div className="indicator-menu">
+                {indicatorNames.map((indicator) => (
+                  <label key={indicator}>
+                    <input
+                      type="checkbox"
+                      checked={enabledIndicators.has(indicator)}
+                      onChange={() => toggleIndicator(indicator)}
+                    />
+                    <span>{indicator}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <StatusBadge status={status} />
           {onRefresh && (
             <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
@@ -128,18 +184,29 @@ export function KLineChart({ rows, quote, status, loading, error, onRefresh, ref
           )}
         </div>
       </div>
-      <div className="chart-legend" aria-label="Chart legend">
-        <span className="legend-item legend-ma5">MA5</span>
-        <span className="legend-item legend-ma10">MA10</span>
-        <span className="legend-item legend-ma20">MA20</span>
-        <span>Volume</span>
+      <div className="trading-chart-shell">
+        <div className="chart-toolrail" aria-label="Chart tools">
+          <button type="button" title="Pointer"><MousePointer2 aria-hidden="true" size={17} /></button>
+          <button type="button" title="Crosshair"><Crosshair aria-hidden="true" size={17} /></button>
+          <button type="button" title="Trend line"><TrendingUp aria-hidden="true" size={17} /></button>
+          <button type="button" title="Measure"><Ruler aria-hidden="true" size={17} /></button>
+          <button type="button" title="Bars"><BarChart3 aria-hidden="true" size={17} /></button>
+        </div>
+        <div className="chart-main">
+          <div className="chart-legend" aria-label="Chart legend">
+            {indicatorEnabled("MA5") && <span className="legend-item legend-ma5">MA5</span>}
+            {indicatorEnabled("MA10") && <span className="legend-item legend-ma10">MA10</span>}
+            {indicatorEnabled("MA20") && <span className="legend-item legend-ma20">MA20</span>}
+            {indicatorEnabled("Volume") && <span>Volume</span>}
+          </div>
+          {loading && <div className="chart-empty">Loading free-stockdb K-line...</div>}
+          {error && <div className="chart-empty chart-error">{error}</div>}
+          {!loading && !error && chartRows.length === 0 && (
+            <div className="chart-empty">No free-stockdb K-line data yet. Start stockdb.exe and use Refresh market.</div>
+          )}
+          {!loading && !error && chartRows.length > 0 && <div ref={containerRef} className="kline-canvas" />}
+        </div>
       </div>
-      {loading && <div className="chart-empty">Loading cached K-line...</div>}
-      {error && <div className="chart-empty chart-error">{error}</div>}
-      {!loading && !error && chartRows.length === 0 && (
-        <div className="chart-empty">No local K-line data yet. Use Refresh market to fetch and cache public-source data.</div>
-      )}
-      {!loading && !error && chartRows.length > 0 && <div ref={containerRef} className="kline-canvas" />}
     </section>
   );
 }

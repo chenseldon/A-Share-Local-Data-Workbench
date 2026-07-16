@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from .database import connect, initialize_database
 from .connectors.astock_sources import ModuleRecord, payload_hash
-from .connectors.public_market import MarketSnapshot
+from .connectors.public_market import MarketSnapshot, ResolvedSecurity
 from .modules import MODULE_BY_ID
 
 
@@ -31,6 +31,29 @@ class DataRepository:
     def _fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         rows = self._fetch_all(query, params)
         return rows[0] if rows else None
+
+    def save_security(self, security: ResolvedSecurity) -> int:
+        connection = connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO securities
+                (symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at)
+                VALUES (?, ?, ?, ?, NULL, ?, true, ?, ?)
+                """,
+                (
+                    security.symbol,
+                    security.name,
+                    security.exchange,
+                    security.asset_type,
+                    security.sector,
+                    security.source,
+                    security.fetched_at,
+                ),
+            )
+            return 1
+        finally:
+            connection.close()
 
     def save_market_snapshot(self, snapshot: MarketSnapshot) -> int:
         connection = connect(self.db_path)
