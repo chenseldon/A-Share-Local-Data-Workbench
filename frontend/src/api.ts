@@ -68,7 +68,7 @@ export function fetchSecurityQuote(symbol: string): Promise<QuoteResponse> {
 }
 
 export function fetchSecurityChart(symbol: string): Promise<ChartResponse> {
-  const params = new URLSearchParams({ period: "1d", adjustment: "none", limit: "160" });
+  const params = new URLSearchParams({ period: "1d", adjustment: "auto", limit: "260" });
   return apiGet<ChartResponse>(`/api/security/${encodeURIComponent(symbol)}/chart?${params.toString()}`);
 }
 

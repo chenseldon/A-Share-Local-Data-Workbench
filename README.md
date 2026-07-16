@@ -79,6 +79,10 @@ Fixture rows are marked with `source = local_fixture` and are not current market
 
 The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stock-data`. It is not imported as an application package. Selected read-only functions are ported into backend connectors and tracked through `GET /api/connectors/capabilities`.
 
+## Local free-stockdb K-line
+
+Daily K-line data is read from local `free-stockdb` first when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is installed in the backend Python environment. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Public Baidu/Tencent K-line endpoints are fallback sources, not the preferred path.
+
 ## Data Safety
 - `trade_date` and `fetched_at` are separate fields.
 - Missing, stale, failed, and not collected states are explicit.

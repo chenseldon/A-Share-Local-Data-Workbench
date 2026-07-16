@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -99,6 +99,10 @@ def tencent_code(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
     code, exchange = normalized.split(".")
     return f"{exchange.lower()}{code}"
+
+
+def stockdb_code(symbol: str) -> str:
+    return normalize_symbol(symbol).split(".")[0]
 
 
 def exchange_name(symbol: str) -> str:
@@ -316,13 +320,111 @@ def fetch_baidu_daily_bars(symbol: str, limit: int = 160, client: httpx.Client |
     return tuple(bars)
 
 
+def fetch_free_stockdb_daily_bars(
+    symbol: str,
+    *,
+    limit: int = 260,
+    start: str | None = None,
+    end: str | None = None,
+    fq: str = "qfq",
+    host: str = "127.0.0.1",
+    port: int = 7899,
+) -> tuple[MarketBar, ...]:
+    normalized = normalize_symbol(symbol)
+    code = stockdb_code(normalized)
+    end_date = end or datetime.now(UTC).strftime("%Y%m%d")
+    start_date = start or (datetime.now(UTC) - timedelta(days=420)).strftime("%Y%m%d")
+    fields = "date,code,name,open,high,low,close,volume,amount,pct_chg"
+    try:
+        from stock_sdk import StockDBClient
+    except ImportError as exc:
+        raise MarketDataError("free-stockdb Python SDK is not installed in this Python environment.") from exc
+
+    fetched_at = datetime.now(UTC)
+    try:
+        client = StockDBClient(host=host, port=port)
+        rows = client.get_data(
+            code=code,
+            start=start_date,
+            end=end_date,
+            frequency="1d",
+            fields=fields,
+            fq=fq,
+            as_df=False,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise MarketDataError(f"free-stockdb K-line request failed: {exc}") from exc
+
+    bars = _stockdb_rows_to_market_bars(normalized, rows, fetched_at=fetched_at, adjustment=fq)
+    if not bars:
+        raise MarketDataError(f"free-stockdb returned no K-line rows for {normalized}")
+    return bars
+
+
+def _stockdb_rows_to_market_bars(
+    symbol: str,
+    rows: Any,
+    *,
+    fetched_at: datetime,
+    adjustment: str,
+) -> tuple[MarketBar, ...]:
+    bars: list[MarketBar] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            raw_date = row.get("date")
+            open_value = row.get("open")
+            high_value = row.get("high")
+            low_value = row.get("low")
+            close_value = row.get("close")
+            volume_value = row.get("volume")
+            amount_value = row.get("amount")
+        else:
+            if not isinstance(row, (list, tuple)) or len(row) < 9:
+                continue
+            raw_date, _, _, open_value, high_value, low_value, close_value, volume_value, amount_value = row[:9]
+        trade_date = _format_stockdb_date(raw_date)
+        if not trade_date:
+            continue
+        raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
+        bars.append(
+            MarketBar(
+                symbol=symbol,
+                trade_date=trade_date,
+                open=_to_float(open_value),
+                high=_to_float(high_value),
+                low=_to_float(low_value),
+                close=_to_float(close_value),
+                volume=_to_float(volume_value),
+                amount=_to_float(amount_value),
+                adjustment=adjustment,
+                source="free_stockdb_kline",
+                fetched_at=fetched_at,
+                raw_payload_hash=_hash_payload(raw),
+            )
+        )
+    return tuple(sorted(bars, key=lambda bar: bar.trade_date))
+
+
+def _format_stockdb_date(value: Any) -> str | None:
+    text = str(value).strip()
+    if re.fullmatch(r"\d{8}", text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text
+    return None
+
+
 def fetch_public_market_snapshot(symbol: str) -> MarketSnapshot:
     security, quote = fetch_tencent_quote(symbol)
     try:
-        bars = fetch_baidu_daily_bars(symbol)
+        bars = fetch_free_stockdb_daily_bars(symbol)
     except MarketDataError:
         try:
-            bars = fetch_tencent_daily_bars(symbol)
+            bars = fetch_baidu_daily_bars(symbol)
         except MarketDataError:
-            bars = ()
+            try:
+                bars = fetch_tencent_daily_bars(symbol)
+            except MarketDataError:
+                bars = ()
     return MarketSnapshot(security=security, quote=quote, bars=bars)

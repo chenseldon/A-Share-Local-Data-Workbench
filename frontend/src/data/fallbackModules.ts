@@ -10,7 +10,7 @@ export const fallbackModules: ModuleDefinition[] = [
     tables: ["market_bars", "market_quotes"],
     sources: ["Tencent Finance", "Baidu K-line", "mootdx optional"],
     planned_fields: ["Daily K-line", "MA5/10/20", "latest quote", "PE/PB/market cap", "index/ETF"],
-    capabilities: { wired: 2, optional_dependency_missing: 2 }
+    capabilities: { wired: 3, optional_dependency_missing: 2 }
   },
   {
     id: "reports",

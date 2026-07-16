@@ -21,10 +21,15 @@ Rows with `source = local_fixture` are deterministic development fixtures. They 
 ## Market Refresh API
 - `POST /api/security/{symbol}/refresh` is the only V1.1 endpoint that triggers public-source market fetches and writes them to DuckDB.
 - `GET /api/security/{symbol}/quote` reads the latest cached row from `market_quotes`.
-- `GET /api/security/{symbol}/chart?period=1d&adjustment=none` reads cached daily bars and returns `ma5`, `ma10`, and `ma20`.
+- `GET /api/security/{symbol}/chart?period=1d&adjustment=auto` reads cached daily bars and returns `ma5`, `ma10`, and `ma20`; `auto` prefers local free-stockdb `qfq`, then falls back to `none` and `hfq`.
 - `GET /api/securities/search?q=...` may remote-resolve only complete six-digit symbols or `SYMBOL.EXCHANGE` inputs; partial search text remains local-only.
 
 ## a-stock-data Alignment API
 - `GET /api/connectors/capabilities` returns the V3.4.0 connector registry and distinguishes `wired`, `planned`, `needs_key`, and `optional_dependency_missing`.
 - `POST /api/modules/{module}/refresh?symbol=...` triggers a read-only module collection job and records success/failure in `data_jobs` and `source_health`.
 - Heterogeneous records from statement, concept, sentiment, option, and future module connectors can be cached in `module_records` with source metadata and a JSON payload.
+
+## Local free-stockdb K-line
+- `free_stockdb_kline` reads from `stockdb.exe` on `127.0.0.1:7899` through `StockDBClient`.
+- Codes are normalized to six digits before querying, preserving leading zeroes.
+- Default local K-line request uses `frequency=1d`, `fq=qfq`, and fields `date,code,name,open,high,low,close,volume,amount,pct_chg`.

@@ -21,7 +21,8 @@
 - All external data should be represented with `source`, `fetched_at`, and freshness state.
 - Demo fixtures are allowed only for development and testing, and must be labeled as fixtures.
 - Demo market bars include a short deterministic K-line series so chart rendering is visible on first launch; these rows remain `local_fixture` and are not current market data.
-- Tencent quote fields now include valuation and limit fields; Baidu daily K-line is the preferred public K-line source with Tencent K-line as fallback.
+- Tencent quote fields now include valuation and limit fields; local free-stockdb daily K-line is the preferred K-line source, with Baidu and Tencent K-line as public fallbacks.
+- free-stockdb integration expects `stockdb.exe` on `127.0.0.1:7899` and `stock_sdk` installed in the backend Python environment. K-line rows are stored as `source=free_stockdb_kline` and `adjustment=qfq`.
 
 ## Secrets
 - No secrets are stored in this project memory.

@@ -154,7 +154,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     def security_chart(
         symbol: str,
         period: str = Query(default="1d", pattern="^1d$"),
-        adjustment: str = Query(default="none", pattern="^none$"),
+        adjustment: str = Query(default="auto", pattern="^(auto|none|qfq|hfq)$"),
         limit: int = Query(default=120, ge=1, le=500),
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:

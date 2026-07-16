@@ -401,7 +401,26 @@ class DataRepository:
             (symbol.upper(),),
         )
 
-    def chart_bars(self, symbol: str, limit: int = 120, adjustment: str = "none") -> list[dict[str, Any]]:
+    def chart_bars(self, symbol: str, limit: int = 120, adjustment: str = "auto") -> list[dict[str, Any]]:
+        if adjustment == "auto":
+            rows = self._chart_bars_for_adjustment(symbol, limit=limit, adjustment="qfq")
+            if not rows:
+                rows = self._chart_bars_for_adjustment(symbol, limit=limit, adjustment="none")
+            if not rows:
+                rows = self._chart_bars_for_adjustment(symbol, limit=limit, adjustment="hfq")
+        else:
+            rows = self._chart_bars_for_adjustment(symbol, limit=limit, adjustment=adjustment)
+        ordered = list(reversed(rows))
+        closes: list[float | None] = []
+        for row in ordered:
+            close = row.get("close")
+            closes.append(float(close) if isinstance(close, (int, float)) else None)
+            row["ma5"] = _moving_average(closes, 5)
+            row["ma10"] = _moving_average(closes, 10)
+            row["ma20"] = _moving_average(closes, 20)
+        return ordered
+
+    def _chart_bars_for_adjustment(self, symbol: str, limit: int, adjustment: str) -> list[dict[str, Any]]:
         rows = self._fetch_all(
             """
             SELECT symbol, trade_date, open, high, low, close, volume, amount, adjustment, source, fetched_at
@@ -412,15 +431,7 @@ class DataRepository:
             """,
             (symbol.upper(), adjustment, limit),
         )
-        ordered = list(reversed(rows))
-        closes: list[float | None] = []
-        for row in ordered:
-            close = row.get("close")
-            closes.append(float(close) if isinstance(close, (int, float)) else None)
-            row["ma5"] = _moving_average(closes, 5)
-            row["ma10"] = _moving_average(closes, 10)
-            row["ma20"] = _moving_average(closes, 20)
-        return ordered
+        return rows
 
     def _latest_market_bar(self, symbol: str) -> dict[str, Any] | None:
         return self._fetch_one(
