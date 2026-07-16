@@ -39,7 +39,7 @@ class DataRepository:
                 """
                 INSERT OR REPLACE INTO securities
                 (symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at)
-                VALUES (?, ?, ?, ?, NULL, ?, true, ?, ?)
+                VALUES (?, ?, ?, ?, NULL, COALESCE(?, (SELECT sector FROM securities WHERE symbol = ?)), true, ?, ?)
                 """,
                 (
                     security.symbol,
@@ -47,6 +47,7 @@ class DataRepository:
                     security.exchange,
                     security.asset_type,
                     security.sector,
+                    security.symbol,
                     security.source,
                     security.fetched_at,
                 ),
@@ -64,7 +65,7 @@ class DataRepository:
                 """
                 INSERT OR REPLACE INTO securities
                 (symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at)
-                VALUES (?, ?, ?, ?, NULL, ?, true, ?, ?)
+                VALUES (?, ?, ?, ?, NULL, COALESCE(?, (SELECT sector FROM securities WHERE symbol = ?)), true, ?, ?)
                 """,
                 [
                     (
@@ -73,6 +74,7 @@ class DataRepository:
                         security.exchange,
                         security.asset_type,
                         security.sector,
+                        security.symbol,
                         security.source,
                         security.fetched_at,
                     )
@@ -122,7 +124,7 @@ class DataRepository:
                 """
                 INSERT OR REPLACE INTO securities
                 (symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at)
-                VALUES (?, ?, ?, ?, NULL, ?, true, ?, ?)
+                VALUES (?, ?, ?, ?, NULL, COALESCE(?, (SELECT sector FROM securities WHERE symbol = ?)), true, ?, ?)
                 """,
                 (
                     snapshot.security.symbol,
@@ -130,6 +132,7 @@ class DataRepository:
                     snapshot.security.exchange,
                     snapshot.security.asset_type,
                     snapshot.security.sector,
+                    snapshot.security.symbol,
                     snapshot.security.source,
                     snapshot.security.fetched_at,
                 ),
@@ -230,6 +233,23 @@ class DataRepository:
                 (str(uuid4()), snapshot.security.source, started_at, finished_at, records_written),
             )
             return records_written
+        finally:
+            connection.close()
+
+    def update_security_sector(self, symbol: str, sector: str | None, source: str, fetched_at: datetime) -> int:
+        if not sector:
+            return 0
+        connection = connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE securities
+                SET sector = ?
+                WHERE upper(symbol) = ?
+                """,
+                (sector, symbol.upper()),
+            )
+            return 1
         finally:
             connection.close()
 

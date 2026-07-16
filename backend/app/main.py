@@ -22,7 +22,11 @@ from .connectors.astock_sources import (
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
 from .connectors.public_market import (
+    FREE_STOCKDB_EXPECTED_SOURCE_COUNT,
+    FREE_STOCKDB_UNIVERSE_PREFIXES,
     MarketDataError,
+    fetch_free_stockdb_board_mapping,
+    fetch_free_stockdb_indicators,
     fetch_free_stockdb_security,
     fetch_free_stockdb_security_universe,
     fetch_public_market_snapshot,
@@ -132,7 +136,9 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         return {
             "status": "fresh",
             "records_written": records_written,
-            "candidates_scanned": 38000,
+            "candidates_scanned": len(FREE_STOCKDB_UNIVERSE_PREFIXES) * 1000,
+            "prefixes_scanned": len(FREE_STOCKDB_UNIVERSE_PREFIXES),
+            "expected_source_count": FREE_STOCKDB_EXPECTED_SOURCE_COUNT,
             "source": "free_stockdb_universe",
         }
 
@@ -156,6 +162,17 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
             normalized_symbol = normalize_symbol(symbol)
             snapshot = fetch_public_market_snapshot(normalized_symbol)
             records_written = repository.save_market_snapshot(snapshot)
+            try:
+                boards = fetch_free_stockdb_board_mapping(normalized_symbol)
+                repository.update_security_sector(
+                    normalized_symbol,
+                    boards.sw_l1[0] if boards.sw_l1 else None,
+                    boards.source,
+                    boards.fetched_at,
+                )
+                repository.record_source_success("signals", boards.source, 1)
+            except MarketDataError as exc:
+                repository.record_source_failure("signals", "free_stockdb_bk", str(exc))
         except (ValueError, MarketDataError) as exc:
             repository.record_market_failure("public_market", str(exc))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -184,15 +201,71 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         period: str = Query(default="1d", pattern="^1d$"),
         adjustment: str = Query(default="auto", pattern="^(auto|none|qfq|hfq)$"),
         limit: int = Query(default=120, ge=1, le=500),
+        indicators: str | None = Query(default=None),
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:
-        rows = repository.chart_bars(symbol, limit=limit, adjustment=adjustment)
+        try:
+            normalized_symbol = normalize_symbol(symbol)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        rows = repository.chart_bars(normalized_symbol, limit=limit, adjustment=adjustment)
+        requested_indicators = _parse_indicators(indicators)
+        indicator_status = "not_requested"
+        indicator_error = None
+        if requested_indicators and rows:
+            try:
+                indicator_rows = fetch_free_stockdb_indicators(
+                    normalized_symbol,
+                    requested_indicators,
+                    start=_chart_boundary(rows, 0),
+                    end=_chart_boundary(rows, -1),
+                    frequency=period,
+                    fq=_indicator_adjustment(adjustment),
+                )
+                _merge_indicator_rows(rows, indicator_rows)
+                indicator_status = "fresh"
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except MarketDataError as exc:
+                indicator_status = "failed"
+                indicator_error = str(exc)
         return {
-            "symbol": symbol.upper(),
+            "symbol": normalized_symbol,
             "period": period,
             "adjustment": adjustment,
             "status": "fresh" if rows else "not_collected",
             "rows": rows,
+            "requested_indicators": list(requested_indicators),
+            "indicator_status": indicator_status,
+            "indicator_error": indicator_error,
+        }
+
+    @app.get("/api/security/{symbol}/boards")
+    def security_boards(
+        symbol: str,
+        repository: DataRepository = Depends(get_repository),
+    ) -> dict[str, object]:
+        try:
+            normalized_symbol = normalize_symbol(symbol)
+            boards = fetch_free_stockdb_board_mapping(normalized_symbol)
+        except (ValueError, MarketDataError) as exc:
+            repository.record_source_failure("signals", "free_stockdb_bk", str(exc))
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        repository.update_security_sector(
+            normalized_symbol,
+            boards.sw_l1[0] if boards.sw_l1 else None,
+            boards.source,
+            boards.fetched_at,
+        )
+        repository.record_source_success("signals", boards.source, 1)
+        return {
+            "symbol": boards.symbol,
+            "concepts": boards.concepts,
+            "sw_l1": boards.sw_l1,
+            "sw_l2": boards.sw_l2,
+            "sw_l3": boards.sw_l3,
+            "source": boards.source,
+            "fetched_at": boards.fetched_at,
         }
 
     @app.get("/api/modules/{module_id}/data")
@@ -314,3 +387,45 @@ def _default_source_for_module(module_id: str) -> str:
         "signals": "eastmoney_concept_blocks",
         "chip_liquidity": "stock_fund_flow_120d",
     }.get(module_id, "not_configured")
+
+
+def _parse_indicators(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    indicators: list[str] = []
+    for item in value.split(","):
+        key = item.strip().lower()
+        if not key:
+            continue
+        if key not in {"ma", "macd", "kdj", "rsi", "boll", "volume"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported chart indicator: {item}")
+        if key != "volume" and key not in indicators:
+            indicators.append(key)
+    return tuple(indicators)
+
+
+def _chart_boundary(rows: list[dict[str, object]], index: int) -> str | None:
+    if not rows:
+        return None
+    value = rows[index].get("trade_date")
+    if value is None:
+        return None
+    return str(value)[:10].replace("-", "")
+
+
+def _indicator_adjustment(adjustment: str) -> str | None:
+    if adjustment == "auto":
+        return "qfq"
+    if adjustment == "none":
+        return None
+    return adjustment
+
+
+def _merge_indicator_rows(rows: list[dict[str, object]], indicator_rows: dict[str, dict[str, object]]) -> None:
+    for row in rows:
+        trade_date = row.get("trade_date")
+        if trade_date is None:
+            continue
+        values = indicator_rows.get(str(trade_date)[:10])
+        if values:
+            row.update(values)

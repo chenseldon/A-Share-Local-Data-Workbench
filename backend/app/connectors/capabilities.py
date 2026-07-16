@@ -21,6 +21,7 @@ class ConnectorCapability:
 _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("market", "free_stockdb_kline", "free-stockdb local SDK", "Local daily K-line data from stockdb.exe on 127.0.0.1:7899.", "wired"),
     ConnectorCapability("market", "free_stockdb_security", "free-stockdb local SDK", "Resolve complete code searches from the latest local K-line row.", "wired"),
+    ConnectorCapability("market", "free_stockdb_zb", "free-stockdb zhibiao SDK", "On-demand technical indicators through zb.get().", "wired"),
     ConnectorCapability("market", "tencent_quote", "Tencent Finance", "Latest quote, valuation and limit fields.", "wired"),
     ConnectorCapability("market", "baidu_kline_with_ma", "Baidu K-line", "Disabled as a chart source; retained only as a reference connector.", "planned"),
     ConnectorCapability("market", "mootdx_bars", "mootdx", "TDX K-line and multi-period bars.", "optional_dependency_missing", optional_dependency="mootdx"),
@@ -33,6 +34,7 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("signals", "ths_hot_reason", "10jqka", "Strong stocks and theme reasons.", "planned"),
     ConnectorCapability("signals", "hsgt_realtime", "Eastmoney", "Northbound capital flow.", "planned"),
     ConnectorCapability("signals", "eastmoney_concept_blocks", "Eastmoney push2", "Stock industry/concept/region block ownership.", "wired"),
+    ConnectorCapability("signals", "free_stockdb_bk", "free-stockdb zhibiao SDK", "Concept and Shenwan industry mapping through bk.get().", "wired"),
     ConnectorCapability("signals", "eastmoney_fund_flow_minute", "Eastmoney push2", "Intraday minute fund flow.", "planned"),
     ConnectorCapability("signals", "dragon_tiger_board", "Eastmoney datacenter", "Stock dragon-tiger records.", "planned"),
     ConnectorCapability("signals", "daily_dragon_tiger", "Eastmoney datacenter", "Full-market dragon-tiger board.", "planned"),

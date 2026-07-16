@@ -79,6 +79,17 @@ export interface ChartBar extends MarketBar {
   ma5: number | null;
   ma10: number | null;
   ma20: number | null;
+  dif?: number | null;
+  dea?: number | null;
+  macd?: number | null;
+  k?: number | null;
+  d?: number | null;
+  j?: number | null;
+  rsi?: number | null;
+  upper?: number | null;
+  mid?: number | null;
+  lower?: number | null;
+  [key: string]: unknown;
 }
 
 export interface Fundamental {
@@ -154,6 +165,16 @@ export interface SecurityUniverseStatus {
   source: string;
 }
 
+export interface BoardMappingResponse {
+  symbol: string;
+  concepts: string[];
+  sw_l1: string[];
+  sw_l2: string[];
+  sw_l3: string[];
+  source: string;
+  fetched_at: string;
+}
+
 export interface ModuleDataResponse {
   module: string;
   status: FreshnessState | "not_found";
@@ -198,6 +219,9 @@ export interface ChartResponse {
   adjustment: string;
   status: FreshnessState;
   rows: ChartBar[];
+  requested_indicators?: string[];
+  indicator_status?: FreshnessState | "not_requested";
+  indicator_error?: string | null;
 }
 
 export interface RefreshResponse {
@@ -207,5 +231,7 @@ export interface RefreshResponse {
   records_written: number;
   source?: string;
   candidates_scanned?: number;
+  prefixes_scanned?: number;
+  expected_source_count?: number;
   module_results?: Record<string, unknown>;
 }

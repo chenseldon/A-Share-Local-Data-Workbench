@@ -1,4 +1,5 @@
 import type {
+  BoardMappingResponse,
   ChartResponse,
   ConnectorCapability,
   DataJob,
@@ -76,9 +77,16 @@ export function fetchSecurityQuote(symbol: string): Promise<QuoteResponse> {
   return apiGet<QuoteResponse>(`/api/security/${encodeURIComponent(symbol)}/quote`);
 }
 
-export function fetchSecurityChart(symbol: string): Promise<ChartResponse> {
+export function fetchSecurityChart(symbol: string, indicators: string[] = ["ma"]): Promise<ChartResponse> {
   const params = new URLSearchParams({ period: "1d", adjustment: "auto", limit: "260" });
+  if (indicators.length > 0) {
+    params.set("indicators", indicators.join(","));
+  }
   return apiGet<ChartResponse>(`/api/security/${encodeURIComponent(symbol)}/chart?${params.toString()}`);
+}
+
+export function fetchSecurityBoards(symbol: string): Promise<BoardMappingResponse> {
+  return apiGet<BoardMappingResponse>(`/api/security/${encodeURIComponent(symbol)}/boards`);
 }
 
 export function fetchModuleData(moduleId: string, symbol: string | null): Promise<ModuleDataResponse> {

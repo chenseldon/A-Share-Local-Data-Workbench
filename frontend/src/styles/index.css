@@ -743,31 +743,18 @@ p {
   font-weight: 800;
 }
 
-.legend-item::before,
-.chart-legend span:last-child::before {
+.legend-item::before {
   display: inline-block;
   width: 16px;
   height: 2px;
   margin-right: 6px;
+  background: var(--legend-color, #9fb0bd);
   vertical-align: middle;
   content: "";
 }
 
-.legend-ma5::before {
-  background: #f59e0b;
-}
-
-.legend-ma10::before {
-  background: #38bdf8;
-}
-
-.legend-ma20::before {
-  background: #c084fc;
-}
-
-.chart-legend span:last-child::before {
-  height: 8px;
-  background: rgba(96, 165, 250, 0.42);
+.chart-warning {
+  color: #fecaca;
 }
 
 .kline-canvas {

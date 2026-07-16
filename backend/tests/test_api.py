@@ -5,10 +5,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.connectors.public_market import MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
+from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
 from app.demo_data import seed_demo_data
 from app.main import create_app
+from app.repository import DataRepository
 
 
 def test_empty_api_states(tmp_path: Path) -> None:
@@ -177,6 +178,9 @@ def test_universe_refresh_builds_local_search_directory(tmp_path: Path, monkeypa
         refresh = client.post("/api/securities/universe/refresh")
         assert refresh.status_code == 200
         assert refresh.json()["records_written"] == 2
+        assert refresh.json()["candidates_scanned"] > 38000
+        assert refresh.json()["prefixes_scanned"] > 38
+        assert refresh.json()["expected_source_count"] == 7400
 
         search = client.get("/api/securities/search?q=\u8305\u53f0")
         assert search.status_code == 200
@@ -284,3 +288,107 @@ def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None
         rows = chart.json()["rows"]
         assert len(rows) == 21
         assert rows[-1]["ma20"] is not None
+
+
+def test_chart_indicators_are_merged_on_demand(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "chart-indicators.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_snapshot(_: str) -> MarketSnapshot:
+        security = ResolvedSecurity(
+            symbol="600004.SH",
+            name="Baiyun Airport",
+            exchange="SSE",
+            asset_type="stock",
+            sector=None,
+            source="free_stockdb_security",
+            fetched_at=fetched_at,
+            raw_payload_hash="security-hash",
+        )
+        bars = tuple(
+            MarketBar(
+                symbol="600004.SH",
+                trade_date=f"2026-07-{day:02d}",
+                open=7.0 + day / 100,
+                high=7.2 + day / 100,
+                low=6.9 + day / 100,
+                close=7.1 + day / 100,
+                volume=1000 + day,
+                amount=100000 + day,
+                adjustment="qfq",
+                source="free_stockdb_kline",
+                fetched_at=fetched_at,
+                raw_payload_hash=f"bar-{day}",
+            )
+            for day in range(1, 4)
+        )
+        return MarketSnapshot(security=security, quote=None, bars=bars)
+
+    def fake_indicators(symbol: str, indicators: tuple[str, ...], **_: object) -> dict[str, dict[str, object]]:
+        assert symbol == "600004.SH"
+        assert indicators == ("ma", "macd")
+        return {
+            "2026-07-03": {
+                "ma5": 7.12,
+                "dif": 0.02,
+                "dea": 0.01,
+                "macd": None,
+            }
+        }
+
+    monkeypatch.setattr("app.main.fetch_public_market_snapshot", fake_snapshot)
+    monkeypatch.setattr("app.main.fetch_free_stockdb_indicators", fake_indicators)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        assert client.post("/api/security/600004/refresh").status_code == 200
+        chart = client.get("/api/security/600004.SH/chart?indicators=ma,macd")
+        assert chart.status_code == 200
+        payload = chart.json()
+        assert payload["indicator_status"] == "fresh"
+        assert payload["requested_indicators"] == ["ma", "macd"]
+        assert payload["rows"][-1]["ma5"] == 7.12
+        assert payload["rows"][-1]["macd"] is None
+
+        invalid = client.get("/api/security/600004.SH/chart?indicators=unknown")
+        assert invalid.status_code == 400
+
+
+def test_boards_endpoint_updates_security_sector(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "boards.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_boards(symbol: str) -> BoardMapping:
+        assert symbol == "600004.SH"
+        return BoardMapping(
+            symbol="600004.SH",
+            concepts=["免税店", "国企改革"],
+            sw_l1=["交通运输"],
+            sw_l2=["航空机场"],
+            sw_l3=["机场"],
+            source="free_stockdb_bk",
+            fetched_at=fetched_at,
+        )
+
+    monkeypatch.setattr("app.main.fetch_free_stockdb_board_mapping", fake_boards)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        DataRepository(db_path).save_security(
+            ResolvedSecurity(
+                symbol="600004.SH",
+                name="白云机场",
+                exchange="SSE",
+                asset_type="stock",
+                sector=None,
+                source="free_stockdb_universe",
+                fetched_at=fetched_at,
+                raw_payload_hash="security-hash",
+            )
+        )
+        boards = client.get("/api/security/600004.SH/boards")
+        assert boards.status_code == 200
+        assert boards.json()["concepts"] == ["免税店", "国企改革"]
+        assert boards.json()["sw_l1"] == ["交通运输"]
+
+        overview = client.get("/api/security/600004.SH/overview")
+        assert overview.status_code == 200
+        assert overview.json()["security"]["sector"] == "交通运输"

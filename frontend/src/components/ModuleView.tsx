@@ -1,5 +1,5 @@
 import { BarChart3, FileText, ListChecks, RadioTower, RefreshCw } from "lucide-react";
-import type { ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition } from "../types";
+import type { BoardMappingResponse, ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
@@ -14,6 +14,10 @@ interface ModuleViewProps {
   chart: ChartResponse | null;
   chartLoading: boolean;
   chartError: string | null;
+  boards: BoardMappingResponse | null;
+  boardError: string | null;
+  chartIndicators: string[];
+  onChartIndicatorsChange: (indicators: string[]) => void;
   quote: MarketQuote | null;
   onRefreshMarket: () => void;
   onRefreshModule: () => void;
@@ -37,6 +41,10 @@ export function ModuleView({
   chart,
   chartLoading,
   chartError,
+  boards,
+  boardError,
+  chartIndicators,
+  onChartIndicatorsChange,
   quote,
   onRefreshMarket,
   onRefreshModule,
@@ -111,6 +119,12 @@ export function ModuleView({
         <KLineChart
           rows={chart?.rows ?? []}
           quote={quote}
+          boards={boards}
+          boardError={boardError}
+          enabledIndicators={chartIndicators}
+          onIndicatorsChange={onChartIndicatorsChange}
+          indicatorStatus={chart?.indicator_status}
+          indicatorError={chart?.indicator_error ?? null}
           loading={chartLoading}
           error={chartError}
           onRefresh={onRefreshMarket}

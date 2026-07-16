@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { BarChart3, Crosshair, MousePointer2, Ruler, Settings2, TrendingUp } from "lucide-react";
 import {
   CandlestickSeries,
@@ -7,19 +7,32 @@ import {
   LineSeries,
   createChart
 } from "lightweight-charts";
-import type { ChartBar, MarketQuote, Security } from "../types";
+import type { BoardMappingResponse, ChartBar, MarketQuote, Security } from "../types";
 
 interface KLineChartProps {
   rows: ChartBar[];
   quote: MarketQuote | null;
   security?: Security | null;
+  boards?: BoardMappingResponse | null;
+  boardError?: string | null;
+  enabledIndicators: string[];
+  onIndicatorsChange: (indicators: string[]) => void;
+  indicatorStatus?: string;
+  indicatorError?: string | null;
   loading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
   refreshing?: boolean;
 }
 
-const indicatorNames = ["MA5", "MA10", "MA20", "Volume"] as const;
+const indicatorOptions = [
+  { id: "ma", label: "MA5/10/20", color: "#f59e0b" },
+  { id: "macd", label: "MACD", color: "#f97316" },
+  { id: "kdj", label: "KDJ", color: "#22c55e" },
+  { id: "rsi", label: "RSI", color: "#e879f9" },
+  { id: "boll", label: "BOLL", color: "#94a3b8" },
+  { id: "volume", label: "Volume", color: "rgba(96, 165, 250, 0.42)" },
+] as const;
 
 function sourceLabel(rows: ChartBar[], quote: MarketQuote | null): string {
   if (rows.length > 0) {
@@ -31,12 +44,23 @@ function sourceLabel(rows: ChartBar[], quote: MarketQuote | null): string {
   return "No cached free-stockdb K-line source";
 }
 
-export function KLineChart({ rows, quote, security, loading, error, onRefresh, refreshing }: KLineChartProps) {
+export function KLineChart({
+  rows,
+  quote,
+  security,
+  boards,
+  boardError,
+  enabledIndicators,
+  onIndicatorsChange,
+  indicatorStatus,
+  indicatorError,
+  loading,
+  error,
+  onRefresh,
+  refreshing
+}: KLineChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
-  const [enabledIndicators, setEnabledIndicators] = useState<Set<string>>(
-    () => new Set(["MA5", "MA10", "MA20", "Volume"])
-  );
   const chartRows = useMemo(
     () =>
       rows.filter(
@@ -51,19 +75,20 @@ export function KLineChart({ rows, quote, security, loading, error, onRefresh, r
   );
 
   function indicatorEnabled(name: string): boolean {
-    return enabledIndicators.has(name);
+    return enabledIndicators.includes(name);
   }
 
   function toggleIndicator(name: string) {
-    setEnabledIndicators((current) => {
-      const next = new Set(current);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
-      return next;
-    });
+    const next = indicatorEnabled(name)
+      ? enabledIndicators.filter((item) => item !== name)
+      : [...enabledIndicators, name];
+    onIndicatorsChange(next);
+  }
+
+  function lineData(field: keyof ChartBar) {
+    return chartRows
+      .filter((row) => typeof row[field] === "number")
+      .map((row) => ({ time: row.trade_date, value: row[field] as number }));
   }
 
   useEffect(() => {
@@ -106,7 +131,7 @@ export function KLineChart({ rows, quote, security, loading, error, onRefresh, r
       }))
     );
 
-    if (indicatorEnabled("Volume")) {
+    if (indicatorEnabled("volume")) {
       const volume = chart.addSeries(HistogramSeries, {
         priceFormat: { type: "volume" },
         priceScaleId: "",
@@ -124,22 +149,59 @@ export function KLineChart({ rows, quote, security, loading, error, onRefresh, r
       );
     }
 
-    if (indicatorEnabled("MA5")) {
+    if (indicatorEnabled("ma")) {
       const ma5 = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 1, priceLineVisible: false });
-      ma5.setData(chartRows.filter((row) => row.ma5 !== null).map((row) => ({ time: row.trade_date, value: row.ma5 ?? 0 })));
-    }
-    if (indicatorEnabled("MA10")) {
+      ma5.setData(lineData("ma5"));
       const ma10 = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 1, priceLineVisible: false });
-      ma10.setData(chartRows.filter((row) => row.ma10 !== null).map((row) => ({ time: row.trade_date, value: row.ma10 ?? 0 })));
-    }
-    if (indicatorEnabled("MA20")) {
+      ma10.setData(lineData("ma10"));
       const ma20 = chart.addSeries(LineSeries, { color: "#c084fc", lineWidth: 1, priceLineVisible: false });
-      ma20.setData(chartRows.filter((row) => row.ma20 !== null).map((row) => ({ time: row.trade_date, value: row.ma20 ?? 0 })));
+      ma20.setData(lineData("ma20"));
+    }
+
+    if (indicatorEnabled("boll")) {
+      const upper = chart.addSeries(LineSeries, { color: "#94a3b8", lineWidth: 1, priceLineVisible: false });
+      upper.setData(lineData("upper"));
+      const mid = chart.addSeries(LineSeries, { color: "#cbd5e1", lineWidth: 1, priceLineVisible: false });
+      mid.setData(lineData("mid"));
+      const lower = chart.addSeries(LineSeries, { color: "#94a3b8", lineWidth: 1, priceLineVisible: false });
+      lower.setData(lineData("lower"));
+    }
+
+    if (indicatorEnabled("macd")) {
+      const macdScale = "macd";
+      const dif = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 1, priceLineVisible: false, priceScaleId: macdScale });
+      dif.setData(lineData("dif"));
+      const dea = chart.addSeries(LineSeries, { color: "#f97316", lineWidth: 1, priceLineVisible: false, priceScaleId: macdScale });
+      dea.setData(lineData("dea"));
+      const macd = chart.addSeries(HistogramSeries, { priceScaleId: macdScale, color: "rgba(249, 115, 22, 0.45)" });
+      chart.priceScale(macdScale).applyOptions({ scaleMargins: { top: 0.68, bottom: 0.16 } });
+      macd.setData(lineData("macd").map((item) => ({ ...item, color: item.value >= 0 ? "rgba(239, 68, 68, 0.45)" : "rgba(34, 197, 94, 0.45)" })));
+    }
+
+    if (indicatorEnabled("kdj")) {
+      const kdjScale = "oscillator";
+      chart.priceScale(kdjScale).applyOptions({ scaleMargins: { top: 0.62, bottom: 0.08 } });
+      const k = chart.addSeries(LineSeries, { color: "#22c55e", lineWidth: 1, priceLineVisible: false, priceScaleId: kdjScale });
+      k.setData(lineData("k"));
+      const d = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 1, priceLineVisible: false, priceScaleId: kdjScale });
+      d.setData(lineData("d"));
+      const j = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 1, priceLineVisible: false, priceScaleId: kdjScale });
+      j.setData(lineData("j"));
+    }
+
+    if (indicatorEnabled("rsi")) {
+      const rsiScale = "oscillator";
+      chart.priceScale(rsiScale).applyOptions({ scaleMargins: { top: 0.62, bottom: 0.08 } });
+      const rsi = chart.addSeries(LineSeries, { color: "#e879f9", lineWidth: 1, priceLineVisible: false, priceScaleId: rsiScale });
+      rsi.setData(lineData("rsi"));
     }
 
     chart.timeScale().fitContent();
     return () => chart.remove();
   }, [chartRows, enabledIndicators]);
+
+  const primarySector = boards?.sw_l1[0] ?? security?.sector ?? "No sector";
+  const conceptPreview = boards?.concepts.slice(0, 3) ?? [];
 
   return (
     <section className="panel chart-panel">
@@ -154,7 +216,11 @@ export function KLineChart({ rows, quote, security, loading, error, onRefresh, r
             <div className="chart-security-meta">
               <span>{security.exchange}</span>
               <span>{security.asset_type}</span>
-              <span>{security.sector ?? "No sector"}</span>
+              <span>{primarySector}</span>
+              {conceptPreview.map((concept) => (
+                <span key={concept}>{concept}</span>
+              ))}
+              {boardError && <span>Board mapping failed</span>}
             </div>
           )}
         </div>
@@ -171,14 +237,14 @@ export function KLineChart({ rows, quote, security, loading, error, onRefresh, r
             </button>
             {indicatorMenuOpen && (
               <div className="indicator-menu">
-                {indicatorNames.map((indicator) => (
-                  <label key={indicator}>
+                {indicatorOptions.map((indicator) => (
+                  <label key={indicator.id}>
                     <input
                       type="checkbox"
-                      checked={enabledIndicators.has(indicator)}
-                      onChange={() => toggleIndicator(indicator)}
+                      checked={indicatorEnabled(indicator.id)}
+                      onChange={() => toggleIndicator(indicator.id)}
                     />
-                    <span>{indicator}</span>
+                    <span>{indicator.label}</span>
                   </label>
                 ))}
               </div>
@@ -201,10 +267,13 @@ export function KLineChart({ rows, quote, security, loading, error, onRefresh, r
         </div>
         <div className="chart-main">
           <div className="chart-legend" aria-label="Chart legend">
-            {indicatorEnabled("MA5") && <span className="legend-item legend-ma5">MA5</span>}
-            {indicatorEnabled("MA10") && <span className="legend-item legend-ma10">MA10</span>}
-            {indicatorEnabled("MA20") && <span className="legend-item legend-ma20">MA20</span>}
-            {indicatorEnabled("Volume") && <span>Volume</span>}
+            {indicatorEnabled("ma") && <span className="legend-item" style={{ "--legend-color": "#f59e0b" } as CSSProperties}>MA5/10/20</span>}
+            {indicatorEnabled("boll") && <span className="legend-item" style={{ "--legend-color": "#94a3b8" } as CSSProperties}>BOLL</span>}
+            {indicatorEnabled("macd") && <span className="legend-item" style={{ "--legend-color": "#f97316" } as CSSProperties}>MACD</span>}
+            {indicatorEnabled("kdj") && <span className="legend-item" style={{ "--legend-color": "#22c55e" } as CSSProperties}>KDJ</span>}
+            {indicatorEnabled("rsi") && <span className="legend-item" style={{ "--legend-color": "#e879f9" } as CSSProperties}>RSI</span>}
+            {indicatorEnabled("volume") && <span className="legend-item" style={{ "--legend-color": "rgba(96, 165, 250, 0.42)" } as CSSProperties}>Volume</span>}
+            {indicatorStatus === "failed" && <span className="chart-warning">{indicatorError ?? "Indicator calculation failed"}</span>}
           </div>
           {loading && <div className="chart-empty">Loading free-stockdb K-line...</div>}
           {error && <div className="chart-empty chart-error">{error}</div>}

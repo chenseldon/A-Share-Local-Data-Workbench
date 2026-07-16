@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchConnectorCapabilities,
+  fetchSecurityBoards,
   fetchSecurityChart,
   fetchJobs,
   fetchModuleData,
@@ -21,6 +22,7 @@ import { TopBar } from "./components/TopBar";
 import { fallbackModules } from "./data/fallbackModules";
 import type {
   DataJob,
+  BoardMappingResponse,
   ChartResponse,
   ConnectorCapability,
   ModuleDataResponse,
@@ -33,7 +35,7 @@ import type {
 
 type ActiveView = "security" | "module" | "system";
 const backgroundRefreshModules = ["fundamentals", "announcements", "reports", "signals", "chip_liquidity"];
-const universeReadyCount = 6500;
+const universeReadyCount = 7400;
 
 interface UpdateProgress {
   active: boolean;
@@ -65,6 +67,9 @@ export default function App() {
   const [chart, setChart] = useState<ChartResponse | null>(null);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
+  const [boards, setBoards] = useState<BoardMappingResponse | null>(null);
+  const [boardError, setBoardError] = useState<string | null>(null);
+  const [chartIndicators, setChartIndicators] = useState<string[]>(["ma", "volume"]);
   const [marketRefreshing, setMarketRefreshing] = useState(false);
   const [moduleRefreshing, setModuleRefreshing] = useState(false);
 
@@ -84,6 +89,7 @@ export default function App() {
     () => modules.find((module) => module.id === activeModule),
     [activeModule, modules]
   );
+  const chartIndicatorKey = useMemo(() => chartIndicators.join(","), [chartIndicators]);
 
   useEffect(() => {
     fetchModules()
@@ -147,10 +153,21 @@ export default function App() {
     setChartLoading(true);
     setOverviewError(null);
     setChartError(null);
-    Promise.all([fetchSecurityOverview(selectedSymbol), fetchSecurityChart(selectedSymbol)])
-      .then(([overviewResponse, chartResponse]) => {
+    Promise.all([
+      fetchSecurityOverview(selectedSymbol),
+      fetchSecurityChart(selectedSymbol, chartIndicators),
+      fetchSecurityBoards(selectedSymbol).catch((error: unknown) => {
+        setBoardError(errorMessage(error));
+        return null;
+      })
+    ])
+      .then(([overviewResponse, chartResponse, boardResponse]) => {
         setOverview(overviewResponse);
         setChart(chartResponse);
+        setBoards(boardResponse);
+        if (boardResponse) {
+          setBoardError(null);
+        }
       })
       .catch((error: unknown) => {
         setOverview(null);
@@ -161,7 +178,7 @@ export default function App() {
         setOverviewLoading(false);
         setChartLoading(false);
       });
-  }, [selectedSymbol]);
+  }, [selectedSymbol, chartIndicatorKey]);
 
   const loadModule = useCallback(() => {
     setModuleLoading(true);
@@ -219,10 +236,19 @@ export default function App() {
     setChartLoading(true);
     setOverviewError(null);
     setChartError(null);
-    Promise.all([fetchSecurityOverview(symbol), fetchSecurityChart(symbol)])
-      .then(([overviewResponse, chartResponse]) => {
+    setBoardError(null);
+    Promise.all([
+      fetchSecurityOverview(symbol),
+      fetchSecurityChart(symbol, chartIndicators),
+      fetchSecurityBoards(symbol).catch((error: unknown) => {
+        setBoardError(errorMessage(error));
+        return null;
+      })
+    ])
+      .then(([overviewResponse, chartResponse, boardResponse]) => {
         setOverview(overviewResponse);
         setChart(chartResponse);
+        setBoards(boardResponse);
       })
       .catch((error: unknown) => {
         const message = errorMessage(error);
@@ -266,10 +292,19 @@ export default function App() {
       setUpdateProgress({ active: true, percent: 85, message: "Updating view..." });
       const [overviewResponse, chartResponse] = await Promise.all([
         fetchSecurityOverview(targetSymbol),
-        fetchSecurityChart(targetSymbol)
+        fetchSecurityChart(targetSymbol, chartIndicators)
       ]);
       setOverview(overviewResponse);
       setChart(chartResponse);
+      await fetchSecurityBoards(targetSymbol)
+        .then((response) => {
+          setBoards(response);
+          setBoardError(null);
+        })
+        .catch((error: unknown) => {
+          setBoards(null);
+          setBoardError(errorMessage(error));
+        });
       await fetchSourceHealth()
         .then((response) => setSources(response.rows))
         .catch(() => setSources([]));
@@ -307,6 +342,10 @@ export default function App() {
         setChartError(message);
       })
       .finally(() => setMarketRefreshing(false));
+  }
+
+  function handleChartIndicatorsChange(nextIndicators: string[]) {
+    setChartIndicators(nextIndicators);
   }
 
   function refreshActiveModule() {
@@ -359,6 +398,10 @@ export default function App() {
               chart={chart}
               chartLoading={chartLoading}
               chartError={chartError}
+              boards={boards}
+              boardError={boardError}
+              chartIndicators={chartIndicators}
+              onChartIndicatorsChange={handleChartIndicatorsChange}
               onRefreshMarket={refreshMarketData}
               marketRefreshing={marketRefreshing}
             />
@@ -373,6 +416,10 @@ export default function App() {
               chart={chart}
               chartLoading={chartLoading}
               chartError={chartError}
+              boards={boards}
+              boardError={boardError}
+              chartIndicators={chartIndicators}
+              onChartIndicatorsChange={handleChartIndicatorsChange}
               quote={overview?.quote ?? null}
               onRefreshMarket={refreshMarketData}
               onRefreshModule={refreshActiveModule}

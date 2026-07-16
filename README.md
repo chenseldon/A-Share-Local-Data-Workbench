@@ -79,11 +79,15 @@ Fixture rows are marked with `source = local_fixture` and are not current market
 
 The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stock-data`. It is not imported as an application package. Selected read-only functions are ported into backend connectors and tracked through `GET /api/connectors/capabilities`.
 
-## Local free-stockdb K-line
+## Local free-stockdb
 
 Daily K-line data is read from local `free-stockdb` when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is installed in the backend Python environment. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Tencent remains a latest quote and valuation source; K-line chart rows do not fall back to Tencent/Baidu example data.
 
-Security search reads the local DuckDB securities directory built from free-stockdb. Run `POST /api/securities/universe/refresh` or use the app startup refresh to scan the supported A-share and ETF prefixes; the current observed directory contains 7,034 symbols. Typing a code or Chinese name returns up to five candidates. Market/module collection starts only after selecting a candidate or pressing refresh.
+The chart indicator library uses the local `zhibiao.zb.get()` SDK on demand. MA is enabled by default; MACD, KDJ, RSI and BOLL are only requested after the user enables them in the chart menu. `NaN` and infinite SDK values are returned as JSON `null`.
+
+Board and concept mapping uses `zhibiao.bk.get()`. Concepts and Shenwan level 1/2/3 industry mappings are shown in the chart header, and Shenwan level 1 is written back to `securities.sector` when available.
+
+Security search reads the local DuckDB securities directory built from free-stockdb. Run `POST /api/securities/universe/refresh` or use the app startup refresh to scan the supported A-share and ETF prefixes. The previous 7,034-symbol scan was incomplete; the refreshed prefix set targets the README-stated 7,400+ universe, and local validation found 7,860 candidates after adding ETF/fund prefixes. Typing a code or Chinese name returns up to five candidates. Market/module collection starts only after selecting a candidate or pressing refresh.
 
 ## Data Safety
 - `trade_date` and `fetched_at` are separate fields.

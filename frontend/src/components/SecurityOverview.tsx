@@ -1,5 +1,5 @@
 import { FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
-import type { ChartResponse, SecurityOverview as SecurityOverviewType } from "../types";
+import type { BoardMappingResponse, ChartResponse, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
@@ -13,6 +13,10 @@ interface SecurityOverviewProps {
   chart: ChartResponse | null;
   chartLoading: boolean;
   chartError: string | null;
+  boards: BoardMappingResponse | null;
+  boardError: string | null;
+  chartIndicators: string[];
+  onChartIndicatorsChange: (indicators: string[]) => void;
   onRefreshMarket: () => void;
   marketRefreshing: boolean;
 }
@@ -32,6 +36,10 @@ export function SecurityOverview({
   chart,
   chartLoading,
   chartError,
+  boards,
+  boardError,
+  chartIndicators,
+  onChartIndicatorsChange,
   onRefreshMarket,
   marketRefreshing
 }: SecurityOverviewProps) {
@@ -58,6 +66,12 @@ export function SecurityOverview({
         rows={chart?.rows ?? []}
         quote={overview.quote}
         security={overview.security}
+        boards={boards}
+        boardError={boardError}
+        enabledIndicators={chartIndicators}
+        onIndicatorsChange={onChartIndicatorsChange}
+        indicatorStatus={chart?.indicator_status}
+        indicatorError={chart?.indicator_error ?? null}
         loading={chartLoading}
         error={chartError}
         onRefresh={onRefreshMarket}

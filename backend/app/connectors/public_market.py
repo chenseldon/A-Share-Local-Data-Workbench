@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import socket
 from dataclasses import dataclass
@@ -129,6 +130,20 @@ FREE_STOCKDB_UNIVERSE_PREFIXES: tuple[str, ...] = (
     "688",
     "689",
     "159",
+    "160",
+    "161",
+    "162",
+    "163",
+    "164",
+    "165",
+    "166",
+    "167",
+    "168",
+    "169",
+    "501",
+    "502",
+    "506",
+    "508",
     "510",
     "511",
     "512",
@@ -137,7 +152,16 @@ FREE_STOCKDB_UNIVERSE_PREFIXES: tuple[str, ...] = (
     "516",
     "517",
     "518",
+    "520",
+    "526",
+    "530",
+    "551",
+    "560",
+    "561",
+    "562",
+    "563",
     "588",
+    "589",
     "430",
     "830",
     "831",
@@ -155,6 +179,15 @@ FREE_STOCKDB_UNIVERSE_PREFIXES: tuple[str, ...] = (
     "873",
     "920",
 )
+
+FREE_STOCKDB_EXPECTED_SOURCE_COUNT = 7400
+FREE_STOCKDB_INDICATOR_CONFIG: dict[str, dict[str, Any]] = {
+    "ma": {"name": "ma", "n": "5,10,20"},
+    "macd": {"name": "macd", "n": "12,26,9"},
+    "kdj": {"name": "kdj", "n": None},
+    "rsi": {"name": "rsi", "n": "6,12,24"},
+    "boll": {"name": "boll", "n": "20"},
+}
 
 
 @dataclass(frozen=True)
@@ -222,6 +255,17 @@ class MarketSnapshot:
     bars: tuple[MarketBar, ...]
 
 
+@dataclass(frozen=True)
+class BoardMapping:
+    symbol: str
+    concepts: list[str]
+    sw_l1: list[str]
+    sw_l2: list[str]
+    sw_l3: list[str]
+    source: str
+    fetched_at: datetime
+
+
 def normalize_symbol(raw_symbol: str) -> str:
     value = raw_symbol.strip().upper()
     if re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", value):
@@ -229,7 +273,7 @@ def normalize_symbol(raw_symbol: str) -> str:
     if not re.fullmatch(r"\d{6}", value):
         raise ValueError(f"Unsupported A-share symbol: {raw_symbol}")
 
-    if value.startswith(("600", "601", "603", "605", "688", "689", "510", "511", "512", "513", "515", "516", "517", "518", "588")):
+    if value.startswith(("5", "600", "601", "603", "605", "688", "689")):
         return f"{value}.SH"
     if value.startswith(("000", "001", "002", "003", "159", "160", "161", "162", "163", "164", "165", "166", "167", "168", "169", "300", "301")):
         return f"{value}.SZ"
@@ -255,7 +299,7 @@ def exchange_name(symbol: str) -> str:
 
 def infer_asset_type(symbol: str) -> str:
     code = normalize_symbol(symbol).split(".")[0]
-    if code.startswith(("510", "511", "512", "513", "515", "516", "517", "518", "588", "159")):
+    if code.startswith(("5", "159", "160", "161", "162", "163", "164", "165", "166", "167", "168", "169")):
         return "etf"
     return "stock"
 
@@ -277,7 +321,7 @@ def fetch_free_stockdb_security(symbol: str) -> ResolvedSecurity:
             fields=fields,
             fq="qfq",
             as_df=False,
-            limit=len(codes),
+            limit=1,
             desc=True,
         )
     except Exception as exc:
@@ -398,6 +442,116 @@ def fetch_free_stockdb_security_universe(chunk_size: int = 500) -> tuple[Resolve
             if security:
                 securities[security.symbol] = security
     return tuple(sorted(securities.values(), key=lambda item: item.symbol))
+
+
+def fetch_free_stockdb_board_mapping(symbol: str) -> BoardMapping:
+    normalized = normalize_symbol(symbol)
+    code = stockdb_code(normalized)
+    if not _tcp_port_open("127.0.0.1", 7899, timeout=0.2):
+        raise MarketDataError("free-stockdb service is not reachable at 127.0.0.1:7899.")
+    try:
+        from zhibiao import bk
+    except ImportError as exc:
+        raise MarketDataError("free-stockdb zhibiao SDK is not installed in this Python environment.") from exc
+
+    try:
+        concepts = _string_list(bk.get(code, 0, "name"))
+        sw_l1 = _string_list(bk.get(code, 1, "name"))
+        sw_l2 = _string_list(bk.get(code, 2, "name"))
+        sw_l3 = _string_list(bk.get(code, 3, "name"))
+    except Exception as exc:
+        raise MarketDataError(f"free-stockdb board mapping request failed: {exc}") from exc
+    return BoardMapping(
+        symbol=normalized,
+        concepts=concepts,
+        sw_l1=sw_l1,
+        sw_l2=sw_l2,
+        sw_l3=sw_l3,
+        source="free_stockdb_bk",
+        fetched_at=datetime.now(UTC),
+    )
+
+
+def fetch_free_stockdb_indicators(
+    symbol: str,
+    indicators: tuple[str, ...],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    frequency: str = "1d",
+    fq: str | None = "qfq",
+) -> dict[str, dict[str, Any]]:
+    normalized = normalize_symbol(symbol)
+    code = stockdb_code(normalized)
+    selected = _normalize_indicator_names(indicators)
+    if not selected:
+        return {}
+    if not _tcp_port_open("127.0.0.1", 7899, timeout=0.2):
+        raise MarketDataError("free-stockdb service is not reachable at 127.0.0.1:7899.")
+    try:
+        from zhibiao import zb
+    except ImportError as exc:
+        raise MarketDataError("free-stockdb zhibiao SDK is not installed in this Python environment.") from exc
+
+    names = [FREE_STOCKDB_INDICATOR_CONFIG[item]["name"] for item in selected]
+    params = [FREE_STOCKDB_INDICATOR_CONFIG[item]["n"] for item in selected]
+    try:
+        rows = zb.get(
+            ",".join(names),
+            code,
+            start=start,
+            end=end,
+            frequency=frequency,
+            fq=fq,
+            n=params if len(params) > 1 else params[0],
+            cross=False,
+        )
+    except Exception as exc:
+        raise MarketDataError(f"free-stockdb indicator request failed: {exc}") from exc
+
+    by_date: dict[str, dict[str, Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        date = _format_stockdb_date(row.get("date"))
+        if not date:
+            continue
+        by_date[date] = {
+            key: _clean_json_value(value)
+            for key, value in row.items()
+            if key != "date"
+        }
+    return by_date
+
+
+def _normalize_indicator_names(indicators: tuple[str, ...]) -> list[str]:
+    selected: list[str] = []
+    for item in indicators:
+        key = item.strip().lower()
+        if not key or key == "volume":
+            continue
+        if key not in FREE_STOCKDB_INDICATOR_CONFIG:
+            raise ValueError(f"Unsupported free-stockdb indicator: {item}")
+        if key not in selected:
+            selected.append(key)
+    return selected
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else [value]
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def _clean_json_value(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _clean_json_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_clean_json_value(item) for item in value]
+    return value
 
 
 def _tcp_port_open(host: str, port: int, *, timeout: float) -> bool:
