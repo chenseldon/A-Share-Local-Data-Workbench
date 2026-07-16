@@ -5,10 +5,12 @@ import {
   fetchJobs,
   fetchModuleData,
   fetchModules,
+  fetchSecurityUniverseStatus,
   fetchSecurityOverview,
   fetchSourceHealth,
   refreshModule,
   refreshSecurity,
+  refreshSecurityUniverse,
   searchSecurities
 } from "./api";
 import { ModuleView } from "./components/ModuleView";
@@ -31,14 +33,21 @@ import type {
 
 type ActiveView = "security" | "module" | "system";
 const backgroundRefreshModules = ["fundamentals", "announcements", "reports", "signals", "chip_liquidity"];
+const universeReadyCount = 6500;
+
+interface UpdateProgress {
+  active: boolean;
+  percent: number;
+  message: string;
+}
+
+interface ToastState {
+  kind: "success" | "failed";
+  message: string;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown request failure.";
-}
-
-function isCompleteSymbolQuery(value: string): boolean {
-  const query = value.trim().toUpperCase();
-  return /^\d{6}$/.test(query) || /^\d{6}\.(SH|SZ|BJ)$/.test(query);
 }
 
 export default function App() {
@@ -68,6 +77,8 @@ export default function App() {
   const [capabilities, setCapabilities] = useState<ConnectorCapability[]>([]);
   const [systemLoading, setSystemLoading] = useState(false);
   const [systemError, setSystemError] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const selectedModule = useMemo(
     () => modules.find((module) => module.id === activeModule),
@@ -84,6 +95,18 @@ export default function App() {
     fetchConnectorCapabilities()
       .then((response) => setCapabilities(response.rows))
       .catch(() => setCapabilities([]));
+    fetchSecurityUniverseStatus()
+      .then((status) => {
+        if (status.count < universeReadyCount) {
+          setUpdateProgress({ active: true, percent: 8, message: "Building free-stockdb symbol directory..." });
+          return refreshSecurityUniverse()
+            .then(() => setUpdateProgress({ active: true, percent: 100, message: "Symbol directory ready." }))
+            .catch(() => setToast({ kind: "failed", message: "Symbol directory refresh failed." }))
+            .finally(() => setTimeout(() => setUpdateProgress(null), 700));
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -98,9 +121,6 @@ export default function App() {
       .then((response: SearchResponse) => {
         if (!cancelled) {
           setSearchResults(response.rows);
-          if (isCompleteSymbolQuery(query) && response.rows.length === 1) {
-            handleSelectSymbol(response.rows[0].symbol);
-          }
         }
       })
       .catch(() => {
@@ -195,7 +215,6 @@ export default function App() {
     setQuery("");
     setSearchResults([]);
     setActiveView("security");
-    setMarketRefreshing(true);
     setOverviewLoading(true);
     setChartLoading(true);
     setOverviewError(null);
@@ -213,27 +232,58 @@ export default function App() {
       .finally(() => {
         setOverviewLoading(false);
         setChartLoading(false);
-        setMarketRefreshing(false);
+        void runFullRefresh(symbol);
       });
-    void refreshSecurity(symbol)
-      .then(() => Promise.all([fetchSecurityOverview(symbol), fetchSecurityChart(symbol)]))
-      .then(([overviewResponse, chartResponse]) => {
-        setOverview(overviewResponse);
-        setChart(chartResponse);
-      })
-      .then(() => Promise.allSettled(backgroundRefreshModules.map((moduleId) => refreshModule(moduleId, symbol))))
-      .then(() => fetchSecurityOverview(symbol))
-      .then(setOverview)
-      .catch(() => undefined);
   }
 
   function refreshCurrentView() {
-    if (activeView === "security") {
-      loadSecurity();
-    } else if (activeView === "module") {
-      loadModule();
-    } else {
-      loadSystem();
+    void runFullRefresh();
+  }
+
+  async function runFullRefresh(targetSymbol = selectedSymbol) {
+    if (!targetSymbol) {
+      return;
+    }
+    setToast(null);
+    setMarketRefreshing(true);
+    setUpdateProgress({ active: true, percent: 5, message: "Checking symbol directory..." });
+    const failures: string[] = [];
+    try {
+      const universe = await fetchSecurityUniverseStatus();
+      if (universe.count < universeReadyCount) {
+        setUpdateProgress({ active: true, percent: 12, message: "Building free-stockdb symbol directory..." });
+        await refreshSecurityUniverse();
+      }
+      setUpdateProgress({ active: true, percent: 35, message: "Refreshing market and K-line data..." });
+      await refreshSecurity(targetSymbol, false);
+      setUpdateProgress({ active: true, percent: 55, message: "Refreshing module data..." });
+      const moduleResults = await Promise.allSettled(backgroundRefreshModules.map((moduleId) => refreshModule(moduleId, targetSymbol)));
+      moduleResults.forEach((result, index) => {
+        if (result.status === "rejected") {
+          failures.push(backgroundRefreshModules[index]);
+        }
+      });
+      setUpdateProgress({ active: true, percent: 85, message: "Updating view..." });
+      const [overviewResponse, chartResponse] = await Promise.all([
+        fetchSecurityOverview(targetSymbol),
+        fetchSecurityChart(targetSymbol)
+      ]);
+      setOverview(overviewResponse);
+      setChart(chartResponse);
+      await fetchSourceHealth()
+        .then((response) => setSources(response.rows))
+        .catch(() => setSources([]));
+      setUpdateProgress({ active: true, percent: 100, message: failures.length ? "Update finished with failed modules." : "Update complete." });
+      setToast({
+        kind: failures.length ? "failed" : "success",
+        message: failures.length ? `${failures.join(", ")} \u90e8\u5206\u63d0\u53d6\u5931\u8d25` : "\u66f4\u65b0\u6210\u529f",
+      });
+    } catch (error: unknown) {
+      setToast({ kind: "failed", message: errorMessage(error) });
+    } finally {
+      setMarketRefreshing(false);
+      setTimeout(() => setUpdateProgress(null), 900);
+      setTimeout(() => setToast(null), 4200);
     }
   }
 
@@ -293,7 +343,6 @@ export default function App() {
       <main className="workspace">
         <TopBar
           query={query}
-          selectedSymbol={selectedSymbol}
           searchResults={searchResults}
           isSearching={isSearching}
           onQueryChange={setQuery}
@@ -335,6 +384,18 @@ export default function App() {
             <SystemView sources={sources} jobs={jobs} capabilities={capabilities} loading={systemLoading} error={systemError} />
           )}
         </div>
+        {updateProgress?.active && (
+          <div className="update-progress" role="status" aria-live="polite">
+            <div className="update-progress-card">
+              <strong>{updateProgress.message}</strong>
+              <div className="progress-track">
+                <span style={{ width: `${updateProgress.percent}%` }} />
+              </div>
+              <small>{updateProgress.percent}%</small>
+            </div>
+          </div>
+        )}
+        {toast && <div className={`toast toast-${toast.kind}`}>{toast.message}</div>}
       </main>
     </div>
   );

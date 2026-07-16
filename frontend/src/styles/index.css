@@ -196,7 +196,7 @@ button {
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto 42px;
+  grid-template-columns: minmax(280px, 1fr) 42px;
   align-items: center;
   gap: 12px;
   min-height: 68px;
@@ -212,7 +212,7 @@ button {
   align-items: center;
   gap: 10px;
   height: 44px;
-  max-width: 620px;
+  max-width: 640px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -273,27 +273,6 @@ button {
 .muted {
   color: var(--muted);
   cursor: default;
-}
-
-.context-strip {
-  display: grid;
-  min-width: 190px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.context-strip span {
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.context-strip strong {
-  margin-top: 2px;
-  font-size: 14px;
 }
 
 .icon-button {
@@ -528,27 +507,153 @@ p {
 }
 
 .chart-heading {
+  align-items: center;
   margin: 0;
-  padding: 16px 18px 10px;
+  padding: 14px 18px 12px;
   border-bottom: 1px solid rgba(216, 224, 232, 0.12);
 }
 
-.chart-heading p {
+.chart-title-block {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chart-kicker {
   color: #9fb0bd;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.chart-security-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chart-security-title h2 {
+  color: #eef4f7;
+  font-size: 24px;
+  line-height: 1.05;
+}
+
+.chart-security-title span {
+  overflow: hidden;
+  color: #9fb0bd;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-security-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.chart-security-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(216, 224, 232, 0.14);
+  border-radius: 7px;
+  background: #172330;
+  color: #ccd8df;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .chart-actions {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
 
 .chart-actions .secondary-button {
+  white-space: nowrap;
   border-color: rgba(216, 224, 232, 0.18);
   background: #172330;
   color: #eef4f7;
+}
+
+.update-progress {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.update-progress-card {
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 56px));
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.update-progress-card strong {
+  font-size: 13px;
+}
+
+.update-progress-card small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.progress-track {
+  overflow: hidden;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--line-soft);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 90;
+  max-width: min(360px, calc(100vw - 44px));
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+}
+
+.toast-success {
+  border-color: #a6e7bc;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.toast-failed {
+  border-color: #fecdca;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .indicator-menu-wrap {
@@ -893,11 +998,6 @@ tr:last-child td {
     grid-template-columns: 1fr 42px;
   }
 
-  .context-strip {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-
   .module-list,
   .metric-row,
   .freshness-grid {
@@ -916,6 +1016,11 @@ tr:last-child td {
 
   .chart-actions {
     justify-content: flex-start;
+  }
+
+  .chart-security-title {
+    display: grid;
+    gap: 4px;
   }
 
   .trading-chart-shell {

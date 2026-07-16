@@ -5,6 +5,7 @@ import type {
   ModuleDataResponse,
   ModuleDefinition,
   QuoteResponse,
+  SecurityUniverseStatus,
   RefreshResponse,
   RowsResponse,
   SearchResponse,
@@ -37,8 +38,16 @@ export function fetchModules(): Promise<ModuleDefinition[]> {
 }
 
 export function searchSecurities(query: string): Promise<SearchResponse> {
-  const params = new URLSearchParams({ q: query, limit: "12" });
+  const params = new URLSearchParams({ q: query, limit: "5" });
   return apiGet<SearchResponse>(`/api/securities/search?${params.toString()}`);
+}
+
+export function fetchSecurityUniverseStatus(): Promise<SecurityUniverseStatus> {
+  return apiGet<SecurityUniverseStatus>("/api/securities/universe/status");
+}
+
+export function refreshSecurityUniverse(): Promise<RefreshResponse> {
+  return apiPost<RefreshResponse>("/api/securities/universe/refresh");
 }
 
 export function fetchSecurityOverview(symbol: string): Promise<SecurityOverview> {

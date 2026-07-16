@@ -83,7 +83,7 @@ The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stoc
 
 Daily K-line data is read from local `free-stockdb` when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is installed in the backend Python environment. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Tencent remains a latest quote and valuation source; K-line chart rows do not fall back to Tencent/Baidu example data.
 
-Security search resolves complete six-digit codes directly from free-stockdb. Chinese name searches first use the local securities cache; when empty, the backend preloads a bounded representative free-stockdb directory so common names can be found without scanning the entire database.
+Security search reads the local DuckDB securities directory built from free-stockdb. Run `POST /api/securities/universe/refresh` or use the app startup refresh to scan the supported A-share and ETF prefixes; the current observed directory contains 7,034 symbols. Typing a code or Chinese name returns up to five candidates. Market/module collection starts only after selecting a candidate or pressing refresh.
 
 ## Data Safety
 - `trade_date` and `fetched_at` are separate fields.

@@ -24,7 +24,7 @@ from .connectors.capabilities import capability_summary_by_module, list_capabili
 from .connectors.public_market import (
     MarketDataError,
     fetch_free_stockdb_security,
-    fetch_free_stockdb_security_batch,
+    fetch_free_stockdb_security_universe,
     fetch_public_market_snapshot,
     normalize_symbol,
 )
@@ -37,10 +37,6 @@ from .repository import DataRepository
 def should_remote_resolve(query: str) -> bool:
     value = query.strip().upper()
     return bool(re.fullmatch(r"\d{6}|\d{6}\.(SH|SZ|BJ)", value))
-
-
-def should_preload_security_directory(query: str) -> bool:
-    return bool(re.search(r"[\u4e00-\u9fff]", query.strip()))
 
 
 def create_app(db_path: Path | str | None = None) -> FastAPI:
@@ -100,8 +96,8 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     @app.get("/api/securities/search")
     def search_securities(
         q: str = "",
-        limit: int = Query(default=20, ge=1, le=100),
-        remote: bool = Query(default=True),
+        limit: int = Query(default=5, ge=1, le=20),
+        remote: bool = Query(default=False),
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:
         rows = repository.search_securities(q, limit)
@@ -118,16 +114,27 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
                 remote_status = "failed"
                 remote_error = str(exc)
                 repository.record_market_failure("free_stockdb_security", str(exc))
-        if remote and not rows and should_preload_security_directory(q):
-            try:
-                records_written = repository.save_securities(fetch_free_stockdb_security_batch())
-                rows = repository.search_securities(q, limit)
-                remote_status = "preloaded" if rows else ("preload_empty" if records_written else "not_collected")
-            except MarketDataError as exc:
-                remote_status = "failed"
-                remote_error = str(exc)
-                repository.record_market_failure("free_stockdb_security_preload", str(exc))
         return {"query": q, "rows": rows, "remote_status": remote_status, "remote_error": remote_error}
+
+    @app.get("/api/securities/universe/status")
+    def securities_universe_status(repository: DataRepository = Depends(get_repository)) -> dict[str, object]:
+        return repository.security_universe_status()
+
+    @app.post("/api/securities/universe/refresh")
+    def refresh_securities_universe(repository: DataRepository = Depends(get_repository)) -> dict[str, object]:
+        try:
+            securities = fetch_free_stockdb_security_universe()
+            records_written = repository.save_securities(securities)
+            repository.record_source_success("market", "free_stockdb_universe", records_written)
+        except MarketDataError as exc:
+            repository.record_market_failure("free_stockdb_universe", str(exc))
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "status": "fresh",
+            "records_written": records_written,
+            "candidates_scanned": 38000,
+            "source": "free_stockdb_universe",
+        }
 
     @app.get("/api/security/{symbol}/overview")
     def security_overview(

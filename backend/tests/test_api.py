@@ -127,13 +127,9 @@ def test_symbol_normalization() -> None:
 def test_partial_search_does_not_remote_resolve(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "partial.duckdb"
 
-    def fake_batch() -> tuple[ResolvedSecurity, ...]:
-        return ()
-
     def fail_exact(_: str) -> ResolvedSecurity:
         raise AssertionError("partial query should not call exact connector")
 
-    monkeypatch.setattr("app.main.fetch_free_stockdb_security_batch", fake_batch)
     monkeypatch.setattr("app.main.fetch_free_stockdb_security", fail_exact)
     app = create_app(db_path)
     with TestClient(app) as client:
@@ -143,11 +139,11 @@ def test_partial_search_does_not_remote_resolve(tmp_path: Path, monkeypatch) -> 
         assert search.json()["remote_status"] == "not_needed"
 
 
-def test_name_search_preloads_free_stockdb_directory(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "name-search.duckdb"
+def test_universe_refresh_builds_local_search_directory(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "universe-search.duckdb"
     fetched_at = datetime(2026, 7, 15, 10, 30, 0)
 
-    def fake_batch() -> tuple[ResolvedSecurity, ...]:
+    def fake_universe() -> tuple[ResolvedSecurity, ...]:
         return (
             ResolvedSecurity(
                 symbol="600519.SH",
@@ -155,20 +151,42 @@ def test_name_search_preloads_free_stockdb_directory(tmp_path: Path, monkeypatch
                 exchange="SSE",
                 asset_type="stock",
                 sector=None,
-                source="free_stockdb_security_preload",
+                source="free_stockdb_universe",
                 fetched_at=fetched_at,
                 raw_payload_hash="security-hash",
             ),
+            ResolvedSecurity(
+                symbol="600004.SH",
+                name="\u767d\u4e91\u673a\u573a",
+                exchange="SSE",
+                asset_type="stock",
+                sector=None,
+                source="free_stockdb_universe",
+                fetched_at=fetched_at,
+                raw_payload_hash="security-hash-2",
+            ),
         )
 
-    monkeypatch.setattr("app.main.fetch_free_stockdb_security_batch", fake_batch)
+    monkeypatch.setattr("app.main.fetch_free_stockdb_security_universe", fake_universe)
     app = create_app(db_path)
     with TestClient(app) as client:
+        status = client.get("/api/securities/universe/status")
+        assert status.status_code == 200
+        assert status.json()["count"] == 0
+
+        refresh = client.post("/api/securities/universe/refresh")
+        assert refresh.status_code == 200
+        assert refresh.json()["records_written"] == 2
+
         search = client.get("/api/securities/search?q=\u8305\u53f0")
         assert search.status_code == 200
         payload = search.json()
-        assert payload["remote_status"] == "preloaded"
+        assert payload["remote_status"] == "not_needed"
         assert payload["rows"][0]["symbol"] == "600519.SH"
+
+        code_search = client.get("/api/securities/search?q=600004")
+        assert code_search.status_code == 200
+        assert code_search.json()["rows"][0]["name"] == "\u767d\u4e91\u673a\u573a"
 
 
 def test_complete_search_resolves_with_free_stockdb_security(tmp_path: Path, monkeypatch) -> None:
@@ -191,7 +209,7 @@ def test_complete_search_resolves_with_free_stockdb_security(tmp_path: Path, mon
     monkeypatch.setattr("app.main.fetch_free_stockdb_security", fake_free_stockdb_security)
     app = create_app(db_path)
     with TestClient(app) as client:
-        search = client.get("/api/securities/search?q=600519")
+        search = client.get("/api/securities/search?q=600519&remote=true")
         assert search.status_code == 200
         payload = search.json()
         assert payload["remote_status"] == "fetched"

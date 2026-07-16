@@ -7,13 +7,12 @@ import {
   LineSeries,
   createChart
 } from "lightweight-charts";
-import type { ChartBar, FreshnessState, MarketQuote } from "../types";
-import { StatusBadge } from "./StatusBadge";
+import type { ChartBar, MarketQuote, Security } from "../types";
 
 interface KLineChartProps {
   rows: ChartBar[];
   quote: MarketQuote | null;
-  status: FreshnessState;
+  security?: Security | null;
   loading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
@@ -23,17 +22,16 @@ interface KLineChartProps {
 const indicatorNames = ["MA5", "MA10", "MA20", "Volume"] as const;
 
 function sourceLabel(rows: ChartBar[], quote: MarketQuote | null): string {
-  const latest = rows.at(-1);
-  if (latest) {
-    return `${latest.source} · ${latest.fetched_at} · adjustment ${latest.adjustment}`;
+  if (rows.length > 0) {
+    return "Local K-line data loaded";
   }
   if (quote) {
-    return `${quote.source} · ${quote.fetched_at}`;
+    return "Latest cached quote loaded";
   }
   return "No cached free-stockdb K-line source";
 }
 
-export function KLineChart({ rows, quote, status, loading, error, onRefresh, refreshing }: KLineChartProps) {
+export function KLineChart({ rows, quote, security, loading, error, onRefresh, refreshing }: KLineChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [enabledIndicators, setEnabledIndicators] = useState<Set<string>>(
@@ -146,9 +144,19 @@ export function KLineChart({ rows, quote, status, loading, error, onRefresh, ref
   return (
     <section className="panel chart-panel">
       <div className="section-heading chart-heading">
-        <div>
-          <h2>K-Line</h2>
-          <p>{sourceLabel(rows, quote)} · public-source quote is not trading-grade real time.</p>
+        <div className="chart-title-block">
+          <span className="chart-kicker">K-Line</span>
+          <div className="chart-security-title">
+            <h2>{security?.symbol ?? "No symbol selected"}</h2>
+            <span>{security?.name ?? sourceLabel(rows, quote)}</span>
+          </div>
+          {security && (
+            <div className="chart-security-meta">
+              <span>{security.exchange}</span>
+              <span>{security.asset_type}</span>
+              <span>{security.sector ?? "No sector"}</span>
+            </div>
+          )}
         </div>
         <div className="chart-actions">
           <div className="indicator-menu-wrap">
@@ -176,7 +184,6 @@ export function KLineChart({ rows, quote, status, loading, error, onRefresh, ref
               </div>
             )}
           </div>
-          <StatusBadge status={status} />
           {onRefresh && (
             <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
               {refreshing ? "Refreshing" : "Refresh market"}
@@ -202,7 +209,7 @@ export function KLineChart({ rows, quote, status, loading, error, onRefresh, ref
           {loading && <div className="chart-empty">Loading free-stockdb K-line...</div>}
           {error && <div className="chart-empty chart-error">{error}</div>}
           {!loading && !error && chartRows.length === 0 && (
-            <div className="chart-empty">No free-stockdb K-line data yet. Start stockdb.exe and use Refresh market.</div>
+            <div className="chart-empty">No free-stockdb K-line data yet. Use Refresh market after stockdb.exe is running.</div>
           )}
           {!loading && !error && chartRows.length > 0 && <div ref={containerRef} className="kline-canvas" />}
         </div>

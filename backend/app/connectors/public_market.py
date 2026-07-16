@@ -115,6 +115,47 @@ FREE_STOCKDB_PRESET_CODES: tuple[str, ...] = (
     "920001",
 )
 
+FREE_STOCKDB_UNIVERSE_PREFIXES: tuple[str, ...] = (
+    "000",
+    "001",
+    "002",
+    "003",
+    "300",
+    "301",
+    "600",
+    "601",
+    "603",
+    "605",
+    "688",
+    "689",
+    "159",
+    "510",
+    "511",
+    "512",
+    "513",
+    "515",
+    "516",
+    "517",
+    "518",
+    "588",
+    "430",
+    "830",
+    "831",
+    "832",
+    "833",
+    "834",
+    "835",
+    "836",
+    "837",
+    "838",
+    "839",
+    "870",
+    "871",
+    "872",
+    "873",
+    "920",
+)
+
 
 @dataclass(frozen=True)
 class ResolvedSecurity:
@@ -258,6 +299,33 @@ def fetch_free_stockdb_security(symbol: str) -> ResolvedSecurity:
     )
 
 
+def _stockdb_security_from_row(row: Any, fetched_at: datetime, source: str) -> ResolvedSecurity | None:
+    if isinstance(row, dict):
+        raw_code = row.get("code")
+        name = row.get("name")
+    elif isinstance(row, (list, tuple)) and len(row) > 2:
+        raw_code = row[1]
+        name = row[2]
+    else:
+        return None
+    code = str(raw_code).strip().upper().split(".")[0].zfill(6)
+    try:
+        normalized = normalize_symbol(code)
+    except ValueError:
+        return None
+    raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
+    return ResolvedSecurity(
+        symbol=normalized,
+        name=str(name) if name else normalized,
+        exchange=exchange_name(normalized),
+        asset_type=infer_asset_type(normalized),
+        sector=None,
+        source=source,
+        fetched_at=fetched_at,
+        raw_payload_hash=_hash_payload(raw),
+    )
+
+
 def fetch_free_stockdb_security_batch(codes: tuple[str, ...] = FREE_STOCKDB_PRESET_CODES) -> tuple[ResolvedSecurity, ...]:
     if not _tcp_port_open("127.0.0.1", 7899, timeout=0.2):
         return ()
@@ -282,34 +350,54 @@ def fetch_free_stockdb_security_batch(codes: tuple[str, ...] = FREE_STOCKDB_PRES
         raise MarketDataError(f"free-stockdb security preload failed: {exc}") from exc
 
     securities: list[ResolvedSecurity] = []
-    for row in rows or []:
-        if isinstance(row, dict):
-            raw_code = row.get("code")
-            name = row.get("name")
-        elif isinstance(row, (list, tuple)) and len(row) > 2:
-            raw_code = row[1]
-            name = row[2]
-        else:
-            continue
-        code = str(raw_code).strip().upper().split(".")[0].zfill(6)
-        try:
-            normalized = normalize_symbol(code)
-        except ValueError:
-            continue
-        raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
-        securities.append(
-            ResolvedSecurity(
-                symbol=normalized,
-                name=str(name) if name else normalized,
-                exchange=exchange_name(normalized),
-                asset_type=infer_asset_type(normalized),
-                sector=None,
-                source="free_stockdb_security_preload",
-                fetched_at=fetched_at,
-                raw_payload_hash=_hash_payload(raw),
-            )
-        )
+    row_iterable: list[Any]
+    if isinstance(rows, dict):
+        row_iterable = [records[0] for records in rows.values() if records]
+    else:
+        row_iterable = list(rows or [])
+    for row in row_iterable:
+        security = _stockdb_security_from_row(row, fetched_at, "free_stockdb_security_preload")
+        if security:
+            securities.append(security)
     return tuple(securities)
+
+
+def fetch_free_stockdb_security_universe(chunk_size: int = 500) -> tuple[ResolvedSecurity, ...]:
+    if not _tcp_port_open("127.0.0.1", 7899, timeout=0.2):
+        raise MarketDataError("free-stockdb service is not reachable at 127.0.0.1:7899.")
+    try:
+        from stock_sdk import StockDBClient
+    except ImportError as exc:
+        raise MarketDataError("free-stockdb Python SDK is not installed in this Python environment.") from exc
+
+    client = StockDBClient(host="127.0.0.1", port=7899)
+    fetched_at = datetime.now(UTC)
+    codes = [f"{prefix}{number:03d}" for prefix in FREE_STOCKDB_UNIVERSE_PREFIXES for number in range(1000)]
+    securities: dict[str, ResolvedSecurity] = {}
+    fields = "date,code,name,close"
+    for offset in range(0, len(codes), chunk_size):
+        batch = codes[offset : offset + chunk_size]
+        try:
+            rows_by_code = client.get_data(
+                code=batch,
+                frequency="1d",
+                fields=fields,
+                fq=None,
+                as_df=False,
+                limit=len(batch),
+                desc=True,
+            )
+        except Exception as exc:
+            raise MarketDataError(f"free-stockdb universe scan failed near {batch[0]}: {exc}") from exc
+        if not isinstance(rows_by_code, dict):
+            continue
+        for records in rows_by_code.values():
+            if not records:
+                continue
+            security = _stockdb_security_from_row(records[0], fetched_at, "free_stockdb_universe")
+            if security:
+                securities[security.symbol] = security
+    return tuple(sorted(securities.values(), key=lambda item: item.symbol))
 
 
 def _tcp_port_open(host: str, port: int, *, timeout: float) -> bool:

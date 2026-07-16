@@ -83,6 +83,13 @@ class DataRepository:
         finally:
             connection.close()
 
+    def record_source_success(self, module: str, source: str, records_written: int) -> None:
+        connection = connect(self.db_path)
+        try:
+            self._record_success(connection, module, source, records_written)
+        finally:
+            connection.close()
+
     def delete_fixture_data(self) -> int:
         connection = connect(self.db_path)
         tables = (
@@ -421,15 +428,25 @@ class DataRepository:
     def search_securities(self, query: str = "", limit: int = 20) -> list[dict[str, Any]]:
         pattern = f"%{query.strip()}%"
         if query.strip():
+            exact = query.strip().upper()
+            normalized_exact = exact if "." in exact else exact.split(".")[0]
             return self._fetch_all(
                 """
                 SELECT symbol, name, exchange, asset_type, listing_date, sector, is_active, source, fetched_at
                 FROM securities
                 WHERE lower(symbol) LIKE lower(?) OR lower(name) LIKE lower(?)
-                ORDER BY symbol
+                ORDER BY
+                  CASE
+                    WHEN upper(symbol) = upper(?) THEN 0
+                    WHEN split_part(upper(symbol), '.', 1) = upper(?) THEN 1
+                    WHEN lower(name) = lower(?) THEN 2
+                    WHEN lower(name) LIKE lower(?) THEN 3
+                    ELSE 4
+                  END,
+                  symbol
                 LIMIT ?
                 """,
-                (pattern, pattern, limit),
+                (pattern, pattern, exact, normalized_exact, query.strip(), pattern, limit),
             )
         return self._fetch_all(
             """
@@ -440,6 +457,20 @@ class DataRepository:
             """,
             (limit,),
         )
+
+    def security_universe_status(self) -> dict[str, Any]:
+        row = self._fetch_one(
+            """
+            SELECT count(*) AS count, max(fetched_at) AS last_fetched_at
+            FROM securities
+            WHERE source IN ('free_stockdb_universe', 'free_stockdb_security', 'free_stockdb_security_preload')
+            """
+        )
+        return {
+            "count": int(row["count"] or 0) if row else 0,
+            "last_fetched_at": row["last_fetched_at"] if row else None,
+            "source": "free_stockdb_universe",
+        }
 
     def get_security_overview(self, symbol: str) -> dict[str, Any]:
         normalized_symbol = symbol.upper()

@@ -1,4 +1,4 @@
-import { AlertTriangle, FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
+import { FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
 import type { ChartResponse, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
@@ -52,22 +52,17 @@ export function SecurityOverview({
     return <EmptyState title="No symbol selected" detail="Search a local security to inspect cross-module context." />;
   }
 
-  const security = overview.security;
-
   return (
     <div className="content-grid">
-      <section className="panel hero-panel">
-        <div>
-          <h1>{security.symbol}</h1>
-          <p>{security.name}</p>
-        </div>
-        <div className="security-meta">
-          <span>{security.exchange}</span>
-          <span>{security.asset_type}</span>
-          <span>{security.sector ?? "No sector"}</span>
-          <StatusBadge status={security.source === "local_fixture" ? "not_collected" : "fresh"} />
-        </div>
-      </section>
+      <KLineChart
+        rows={chart?.rows ?? []}
+        quote={overview.quote}
+        security={overview.security}
+        loading={chartLoading}
+        error={chartError}
+        onRefresh={onRefreshMarket}
+        refreshing={marketRefreshing}
+      />
 
       <section className="metric-row">
         <div className="metric-panel">
@@ -95,23 +90,6 @@ export function SecurityOverview({
           <small>Announcements + reports</small>
         </div>
       </section>
-
-      {security.source === "local_fixture" && (
-        <section className="notice-panel">
-          <AlertTriangle aria-hidden="true" size={18} />
-          <span>Fixture data is loaded for development only. Do not treat it as current market data.</span>
-        </section>
-      )}
-
-      <KLineChart
-        rows={chart?.rows ?? []}
-        quote={overview.quote}
-        status={chart?.status ?? "not_collected"}
-        loading={chartLoading}
-        error={chartError}
-        onRefresh={onRefreshMarket}
-        refreshing={marketRefreshing}
-      />
 
       <section className="panel split-panel">
         <div>

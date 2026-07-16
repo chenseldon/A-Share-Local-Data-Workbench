@@ -3,7 +3,6 @@ import type { Security } from "../types";
 
 interface TopBarProps {
   query: string;
-  selectedSymbol: string;
   searchResults: Security[];
   isSearching: boolean;
   onQueryChange: (value: string) => void;
@@ -13,7 +12,6 @@ interface TopBarProps {
 
 export function TopBar({
   query,
-  selectedSymbol,
   searchResults,
   isSearching,
   onQueryChange,
@@ -32,9 +30,9 @@ export function TopBar({
         />
         {query && (
           <div className="search-results">
-            {isSearching && <div className="search-row muted">Searching cache and public sources...</div>}
+            {isSearching && <div className="search-row muted">Searching local free-stockdb directory...</div>}
             {!isSearching && searchResults.length === 0 && (
-              <div className="search-row muted">No cached or resolvable match.</div>
+              <div className="search-row muted">No local free-stockdb match.</div>
             )}
             {searchResults.map((security) => (
               <button key={security.symbol} className="search-row" onClick={() => onSelectSymbol(security.symbol)}>
@@ -45,10 +43,6 @@ export function TopBar({
             ))}
           </div>
         )}
-      </div>
-      <div className="context-strip">
-        <span>Context</span>
-        <strong>{selectedSymbol || "No symbol selected"}</strong>
       </div>
       <button className="icon-button" onClick={onRefresh} aria-label="Refresh current view">
         <RefreshCw aria-hidden="true" size={17} />

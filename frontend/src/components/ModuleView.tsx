@@ -111,7 +111,6 @@ export function ModuleView({
         <KLineChart
           rows={chart?.rows ?? []}
           quote={quote}
-          status={chart?.status ?? "not_collected"}
           loading={chartLoading}
           error={chartError}
           onRefresh={onRefreshMarket}

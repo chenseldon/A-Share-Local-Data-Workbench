@@ -144,8 +144,14 @@ export interface SecurityOverview {
 export interface SearchResponse {
   query: string;
   rows: Security[];
-  remote_status?: FreshnessState | "fetched" | "not_needed";
+  remote_status?: FreshnessState | "fetched" | "not_needed" | "preloaded" | "preload_empty";
   remote_error?: string | null;
+}
+
+export interface SecurityUniverseStatus {
+  count: number;
+  last_fetched_at: string | null;
+  source: string;
 }
 
 export interface ModuleDataResponse {
@@ -200,5 +206,6 @@ export interface RefreshResponse {
   status: FreshnessState;
   records_written: number;
   source?: string;
+  candidates_scanned?: number;
   module_results?: Record<string, unknown>;
 }
