@@ -8,12 +8,16 @@ import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 
 class MarketDataError(RuntimeError):
     pass
+
+
+CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 FREE_STOCKDB_PRESET_CODES: tuple[str, ...] = (
@@ -279,6 +283,7 @@ class MarketBar:
     source: str
     fetched_at: datetime
     raw_payload_hash: str
+    chart_time: int | None = None
 
 
 @dataclass(frozen=True)
@@ -800,20 +805,24 @@ def fetch_baidu_daily_bars(symbol: str, limit: int = 160, client: httpx.Client |
     return tuple(bars)
 
 
-def fetch_free_stockdb_daily_bars(
+def fetch_free_stockdb_bars(
     symbol: str,
     *,
     limit: int = 260,
     start: str | None = None,
     end: str | None = None,
-    fq: str = "qfq",
+    frequency: str = "1d",
+    fq: str | None = "qfq",
     host: str = "127.0.0.1",
     port: int = 7899,
 ) -> tuple[MarketBar, ...]:
+    if frequency not in {"1m", "5m", "15m", "30m", "60m", "1d", "1w", "1M"}:
+        raise MarketDataError(f"Unsupported free-stockdb K-line frequency: {frequency}")
     normalized = normalize_symbol(symbol)
     code = stockdb_code(normalized)
-    end_date = end or datetime.now(UTC).strftime("%Y%m%d")
-    start_date = start or (datetime.now(UTC) - timedelta(days=420)).strftime("%Y%m%d")
+    now = datetime.now(UTC)
+    end_date = end or now.strftime("%Y%m%d%H%M%S" if frequency.endswith("m") else "%Y%m%d")
+    start_date = start or (now - _default_frequency_window(frequency)).strftime("%Y%m%d%H%M%S" if frequency.endswith("m") else "%Y%m%d")
     fields = "date,code,name,open,high,low,close,volume,amount,pct_chg"
     try:
         from stock_sdk import StockDBClient
@@ -827,19 +836,52 @@ def fetch_free_stockdb_daily_bars(
             code=code,
             start=start_date,
             end=end_date,
-            frequency="1d",
+            frequency=frequency,
             fields=fields,
             fq=fq,
             as_df=False,
             limit=limit,
+            desc=True,
         )
     except Exception as exc:
         raise MarketDataError(f"free-stockdb K-line request failed: {exc}") from exc
 
-    bars = _stockdb_rows_to_market_bars(normalized, rows, fetched_at=fetched_at, adjustment=fq)
+    bars = _stockdb_rows_to_market_bars(normalized, rows, fetched_at=fetched_at, adjustment=fq or "none")
     if not bars:
         raise MarketDataError(f"free-stockdb returned no K-line rows for {normalized}")
     return bars
+
+
+def fetch_free_stockdb_daily_bars(
+    symbol: str,
+    *,
+    limit: int = 260,
+    start: str | None = None,
+    end: str | None = None,
+    fq: str | None = "qfq",
+    host: str = "127.0.0.1",
+    port: int = 7899,
+) -> tuple[MarketBar, ...]:
+    return fetch_free_stockdb_bars(
+        symbol,
+        limit=limit,
+        start=start,
+        end=end,
+        frequency="1d",
+        fq=fq,
+        host=host,
+        port=port,
+    )
+
+
+def _default_frequency_window(frequency: str) -> timedelta:
+    if frequency in {"1m", "5m", "15m", "30m", "60m"}:
+        return timedelta(days=30)
+    if frequency == "1w":
+        return timedelta(days=365 * 5)
+    if frequency == "1M":
+        return timedelta(days=365 * 12)
+    return timedelta(days=420)
 
 
 def _stockdb_rows_to_market_bars(
@@ -866,11 +908,13 @@ def _stockdb_rows_to_market_bars(
         trade_date = _format_stockdb_date(raw_date)
         if not trade_date:
             continue
+        chart_time = _stockdb_chart_time(raw_date)
         raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
         bars.append(
             MarketBar(
                 symbol=symbol,
                 trade_date=trade_date,
+                chart_time=chart_time,
                 open=_to_float(open_value),
                 high=_to_float(high_value),
                 low=_to_float(low_value),
@@ -883,15 +927,39 @@ def _stockdb_rows_to_market_bars(
                 raw_payload_hash=_hash_payload(raw),
             )
         )
-    return tuple(sorted(bars, key=lambda bar: bar.trade_date))
+    return tuple(sorted(bars, key=lambda bar: bar.chart_time or 0))
 
 
 def _format_stockdb_date(value: Any) -> str | None:
     text = str(value).strip()
+    if re.fullmatch(r"\d{14}", text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]} {text[8:10]}:{text[10:12]}:{text[12:14]}"
     if re.fullmatch(r"\d{8}", text):
         return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         return text
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", text):
+        return text
+    return None
+
+
+def _stockdb_chart_time(value: Any) -> int | None:
+    text = str(value).strip()
+    try:
+        if re.fullmatch(r"\d{14}", text):
+            parsed = datetime.strptime(text, "%Y%m%d%H%M%S").replace(tzinfo=CHINA_TZ)
+            return int(parsed.timestamp())
+        if re.fullmatch(r"\d{8}", text):
+            parsed = datetime.strptime(text, "%Y%m%d").replace(tzinfo=CHINA_TZ)
+            return int(parsed.timestamp())
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            parsed = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=CHINA_TZ)
+            return int(parsed.timestamp())
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", text):
+            parsed = datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CHINA_TZ)
+            return int(parsed.timestamp())
+    except ValueError:
+        return None
     return None
 
 

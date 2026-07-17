@@ -16,6 +16,7 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const GET_TIMEOUT_MS = 25_000;
+export type ChartPeriod = "1m" | "5m" | "15m" | "30m" | "60m" | "1d" | "1w" | "1M";
 
 async function apiGet<T>(path: string): Promise<T> {
   const controller = new AbortController();
@@ -48,6 +49,10 @@ async function apiPost<T>(path: string): Promise<T> {
 
 export function fetchModules(): Promise<ModuleDefinition[]> {
   return apiGet<ModuleDefinition[]>("/api/modules");
+}
+
+export function fetchHealth(): Promise<{ status: string; database: string }> {
+  return apiGet<{ status: string; database: string }>("/api/health");
 }
 
 export function searchSecurities(query: string): Promise<SearchResponse> {
@@ -89,8 +94,13 @@ export function fetchSecurityQuote(symbol: string): Promise<QuoteResponse> {
   return apiGet<QuoteResponse>(`/api/security/${encodeURIComponent(symbol)}/quote`);
 }
 
-export function fetchSecurityChart(symbol: string, indicators: string[] = ["ma"]): Promise<ChartResponse> {
-  const params = new URLSearchParams({ period: "1d", adjustment: "auto", limit: "260" });
+export function fetchSecurityChart(
+  symbol: string,
+  indicators: string[] = ["ma"],
+  period: ChartPeriod = "1d"
+): Promise<ChartResponse> {
+  const limit = period.endsWith("m") ? "300" : period === "1d" ? "260" : "240";
+  const params = new URLSearchParams({ period, adjustment: "auto", limit });
   if (indicators.length > 0) {
     params.set("indicators", indicators.join(","));
   }

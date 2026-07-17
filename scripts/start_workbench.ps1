@@ -37,6 +37,21 @@ function Test-TcpPortOpen {
     }
 }
 
+function Test-HttpHealth {
+    param(
+        [string]$Url,
+        [int]$TimeoutSec = 2
+    )
+
+    try {
+        $response = Invoke-RestMethod -Uri $Url -TimeoutSec $TimeoutSec
+        return $null -ne $response -and $response.status -eq "ok"
+    }
+    catch {
+        return $false
+    }
+}
+
 function Assert-BackendDependencies {
     python -c "import duckdb, fastapi, uvicorn" | Out-Null
 }
@@ -91,8 +106,16 @@ Set-Location '$FrontendRoot'
 npm.cmd run dev -- --host 127.0.0.1 --port $FrontendPort
 "@
 
+$backendHealthUrl = "http://127.0.0.1:$BackendPort/api/health"
+$frontendUrl = "http://127.0.0.1:$FrontendPort"
+
 if (Test-TcpPortOpen $BackendPort) {
-    Write-Host "Backend port $BackendPort is already in use; not starting another backend process." -ForegroundColor Yellow
+    if (Test-HttpHealth $backendHealthUrl) {
+        Write-Host "Backend port $BackendPort is already serving /api/health; reusing it." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Backend port $BackendPort is occupied, but /api/health is not reachable. Close the stale process or change the port." -ForegroundColor Red
+    }
 }
 else {
     Start-Process powershell.exe -WorkingDirectory $ProjectRoot -ArgumentList @(
@@ -105,7 +128,7 @@ else {
 }
 
 if (Test-TcpPortOpen $FrontendPort) {
-    Write-Host "Frontend port $FrontendPort is already in use; not starting another frontend process." -ForegroundColor Yellow
+    Write-Host "Frontend port $FrontendPort is already in use; not starting another frontend process. Use $frontendUrl." -ForegroundColor Yellow
 }
 else {
     Start-Process powershell.exe -WorkingDirectory $FrontendRoot -ArgumentList @(
@@ -119,10 +142,10 @@ else {
 
 Start-Sleep -Seconds 3
 
-$url = "http://127.0.0.1:$FrontendPort"
-Write-Host "Open: $url" -ForegroundColor Green
+Write-Host "API health: $backendHealthUrl" -ForegroundColor DarkCyan
+Write-Host "Open: $frontendUrl" -ForegroundColor Green
 Write-Host "Demo data enabled: $DemoDataEnabled"
 
 if (-not $NoOpen) {
-    Start-Process $url
+    Start-Process $frontendUrl
 }

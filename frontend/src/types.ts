@@ -48,6 +48,7 @@ export interface Security {
 export interface MarketBar {
   symbol: string;
   trade_date: string;
+  chart_time?: number | null;
   open: number | null;
   high: number | null;
   low: number | null;

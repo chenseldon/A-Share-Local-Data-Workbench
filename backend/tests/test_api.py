@@ -273,6 +273,7 @@ def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None
         return MarketSnapshot(security=security, quote=quote, bars=bars)
 
     monkeypatch.setattr("app.main.fetch_public_market_snapshot", fake_snapshot)
+    monkeypatch.setattr("app.main.fetch_free_stockdb_bars", lambda symbol, **_: fake_snapshot(symbol).bars)
     app = create_app(db_path)
     with TestClient(app) as client:
         refresh = client.post("/api/security/600519/refresh")
@@ -324,9 +325,10 @@ def test_chart_indicators_are_merged_on_demand(tmp_path: Path, monkeypatch) -> N
         )
         return MarketSnapshot(security=security, quote=None, bars=bars)
 
-    def fake_indicators(symbol: str, indicators: tuple[str, ...], **_: object) -> dict[str, dict[str, object]]:
+    def fake_indicators(symbol: str, indicators: tuple[str, ...], **kwargs: object) -> dict[str, dict[str, object]]:
         assert symbol == "600004.SH"
         assert indicators == ("ma", "macd")
+        assert kwargs["frequency"] == "1d"
         return {
             "2026-07-03": {
                 "ma5": 7.12,
@@ -337,6 +339,7 @@ def test_chart_indicators_are_merged_on_demand(tmp_path: Path, monkeypatch) -> N
         }
 
     monkeypatch.setattr("app.main.fetch_public_market_snapshot", fake_snapshot)
+    monkeypatch.setattr("app.main.fetch_free_stockdb_bars", lambda symbol, **_: fake_snapshot(symbol).bars)
     monkeypatch.setattr("app.main.fetch_free_stockdb_indicators", fake_indicators)
     app = create_app(db_path)
     with TestClient(app) as client:
@@ -351,6 +354,44 @@ def test_chart_indicators_are_merged_on_demand(tmp_path: Path, monkeypatch) -> N
 
         invalid = client.get("/api/security/600004.SH/chart?indicators=unknown")
         assert invalid.status_code == 400
+
+
+def test_chart_period_uses_free_stockdb_frequency(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "chart-period.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_bars(symbol: str, **kwargs: object) -> tuple[MarketBar, ...]:
+        assert symbol == "600004.SH"
+        assert kwargs["frequency"] == "1m"
+        return (
+            MarketBar(
+                symbol="600004.SH",
+                trade_date="2026-07-16 09:31:00",
+                chart_time=1784165460,
+                open=7.1,
+                high=7.2,
+                low=7.0,
+                close=7.15,
+                volume=1000,
+                amount=7150,
+                adjustment="qfq",
+                source="free_stockdb_kline",
+                fetched_at=fetched_at,
+                raw_payload_hash="bar-1m",
+            ),
+        )
+
+    monkeypatch.setattr("app.main.fetch_free_stockdb_bars", fake_bars)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        chart = client.get("/api/security/600004.SH/chart?period=1m")
+        assert chart.status_code == 200
+        payload = chart.json()
+        assert payload["period"] == "1m"
+        assert payload["rows"][0]["chart_time"] == 1784165460
+
+        invalid = client.get("/api/security/600004.SH/chart?period=4h")
+        assert invalid.status_code == 422
 
 
 def test_boards_endpoint_updates_security_sector(tmp_path: Path, monkeypatch) -> None:

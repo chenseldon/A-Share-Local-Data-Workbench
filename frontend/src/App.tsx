@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  type ChartPeriod,
   fetchConnectorCapabilities,
+  fetchHealth,
   fetchSecurityBoards,
   fetchSecurityChart,
   fetchJobs,
@@ -56,7 +58,7 @@ export default function App() {
   const [modules, setModules] = useState<ModuleDefinition[]>(fallbackModules);
   const [activeView, setActiveView] = useState<ActiveView>("security");
   const [activeModule, setActiveModule] = useState("market");
-  const [selectedSymbol, setSelectedSymbol] = useState("600519.SH");
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Security[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -70,6 +72,7 @@ export default function App() {
   const [boards, setBoards] = useState<BoardMappingResponse | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
   const [chartIndicators, setChartIndicators] = useState<string[]>(["ma", "volume", "macd", "rsi"]);
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("1d");
   const [marketRefreshing, setMarketRefreshing] = useState(false);
   const [moduleRefreshing, setModuleRefreshing] = useState(false);
 
@@ -84,6 +87,7 @@ export default function App() {
   const [systemError, setSystemError] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [apiHealthError, setApiHealthError] = useState<string | null>(null);
 
   const selectedModule = useMemo(
     () => modules.find((module) => module.id === activeModule),
@@ -92,6 +96,9 @@ export default function App() {
   const chartIndicatorKey = useMemo(() => chartIndicators.join(","), [chartIndicators]);
 
   useEffect(() => {
+    fetchHealth()
+      .then(() => setApiHealthError(null))
+      .catch((error: unknown) => setApiHealthError(errorMessage(error)));
     fetchModules()
       .then(setModules)
       .catch(() => setModules(fallbackModules));
@@ -147,6 +154,8 @@ export default function App() {
 
   const loadSecurity = useCallback(() => {
     if (!selectedSymbol) {
+      setOverview(null);
+      setChart(null);
       return;
     }
     setOverviewLoading(true);
@@ -164,7 +173,7 @@ export default function App() {
       .finally(() => {
         setOverviewLoading(false);
       });
-    fetchSecurityChart(selectedSymbol, chartIndicators)
+    fetchSecurityChart(selectedSymbol, chartIndicators, chartPeriod)
       .then(setChart)
       .catch((error: unknown) => {
         setChart(null);
@@ -180,7 +189,7 @@ export default function App() {
         setBoards(null);
         setBoardError(errorMessage(error));
       });
-  }, [selectedSymbol, chartIndicatorKey]);
+  }, [selectedSymbol, chartIndicatorKey, chartPeriod]);
 
   const loadModule = useCallback(() => {
     setModuleLoading(true);
@@ -248,7 +257,7 @@ export default function App() {
         setOverviewError(errorMessage(error));
       })
       .finally(() => setOverviewLoading(false));
-    fetchSecurityChart(symbol, chartIndicators)
+    fetchSecurityChart(symbol, chartIndicators, chartPeriod)
       .then(setChart)
       .catch((error: unknown) => {
         setChart(null);
@@ -297,7 +306,7 @@ export default function App() {
       setUpdateProgress({ active: true, percent: 85, message: "Updating view..." });
       const [overviewResponse, chartResponse] = await Promise.all([
         fetchSecurityOverview(targetSymbol),
-        fetchSecurityChart(targetSymbol, chartIndicators)
+        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod)
       ]);
       setOverview(overviewResponse);
       setChart(chartResponse);
@@ -329,6 +338,10 @@ export default function App() {
 
   function handleChartIndicatorsChange(nextIndicators: string[]) {
     setChartIndicators(nextIndicators);
+  }
+
+  function handleChartPeriodChange(nextPeriod: ChartPeriod) {
+    setChartPeriod(nextPeriod);
   }
 
   function refreshActiveModule() {
@@ -387,6 +400,8 @@ export default function App() {
               boardError={boardError}
               chartIndicators={chartIndicators}
               onChartIndicatorsChange={handleChartIndicatorsChange}
+              chartPeriod={chartPeriod}
+              onChartPeriodChange={handleChartPeriodChange}
               onRefreshMarket={refreshCurrentView}
               marketRefreshing={marketRefreshing}
               searchQuery={query}
@@ -394,6 +409,7 @@ export default function App() {
               isSearching={isSearching}
               onSearchQueryChange={setQuery}
               onSelectSymbol={handleSelectSymbol}
+              apiHealthError={apiHealthError}
             />
           )}
           {activeView === "module" && (

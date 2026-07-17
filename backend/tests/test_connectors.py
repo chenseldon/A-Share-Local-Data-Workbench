@@ -33,4 +33,5 @@ def test_stockdb_rows_are_normalized_to_market_bars() -> None:
     assert bars[0].symbol == "600519.SH"
     assert bars[0].adjustment == "qfq"
     assert bars[0].source == "free_stockdb_kline"
+    assert bars[0].chart_time is not None
     assert bars[1].close == 1251.06

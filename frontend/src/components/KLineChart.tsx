@@ -7,8 +7,13 @@ import {
   type PointerEvent
 } from "react";
 import {
+  ArrowUpRight,
   Brush,
   ChevronUp,
+  Crosshair,
+  Eye,
+  EyeOff,
+  Lock,
   Minus,
   MousePointer2,
   Plus,
@@ -16,6 +21,7 @@ import {
   Ruler,
   Search,
   Settings2,
+  Square,
   TextCursorInput,
   Trash2,
   TrendingUp,
@@ -33,6 +39,7 @@ import {
   type LogicalRangeChangeEventHandler,
   type Time
 } from "lightweight-charts";
+import type { ChartPeriod } from "../api";
 import type { BoardMappingResponse, ChartBar, MarketQuote, Security } from "../types";
 
 interface KLineChartProps {
@@ -43,6 +50,8 @@ interface KLineChartProps {
   boardError?: string | null;
   enabledIndicators: string[];
   onIndicatorsChange: (indicators: string[]) => void;
+  period?: ChartPeriod;
+  onPeriodChange?: (period: ChartPeriod) => void;
   indicatorStatus?: string;
   indicatorError?: string | null;
   loading?: boolean;
@@ -57,8 +66,9 @@ interface KLineChartProps {
 }
 
 type IndicatorPlacement = "overlay" | "pane" | "built_in";
-type DrawingTool = "cursor" | "trend" | "horizontal" | "vertical" | "brush" | "text" | "measure";
-type DrawingKind = Exclude<DrawingTool, "cursor">;
+type DrawingTool = "crosshair" | "horizontalSegment" | "segment" | "verticalSegment" | "parallel" | "arrow" | "priceLine" | "text" | "rectangle" | "fibonacci";
+type DrawingAction = "lock" | "hide" | "clear";
+type DrawingKind = DrawingTool;
 
 interface IndicatorOption {
   id: string;
@@ -123,15 +133,34 @@ const indicatorOptions: IndicatorOption[] = [
   { id: "volume", label: "Volume", placement: "built_in", fields: ["volume"], color: "rgba(96, 165, 250, 0.42)", description: "Volume bars" }
 ];
 
-const toolButtons: Array<{ tool: DrawingTool | "clear"; title: string; icon: typeof MousePointer2 }> = [
-  { tool: "cursor", title: "Cursor", icon: MousePointer2 },
-  { tool: "trend", title: "Trend line", icon: TrendingUp },
-  { tool: "horizontal", title: "Horizontal line", icon: Minus },
-  { tool: "vertical", title: "Vertical line", icon: WholeWord },
-  { tool: "brush", title: "Brush", icon: Brush },
-  { tool: "text", title: "Text note", icon: TextCursorInput },
-  { tool: "measure", title: "Measure", icon: Ruler },
-  { tool: "clear", title: "Clear drawings", icon: Trash2 }
+const toolButtons: Array<{ tool: DrawingTool; title: string; icon: typeof MousePointer2 }> = [
+  { tool: "crosshair", title: "Crosshair", icon: Crosshair },
+  { tool: "horizontalSegment", title: "Horizontal segment", icon: Minus },
+  { tool: "segment", title: "Line segment", icon: TrendingUp },
+  { tool: "verticalSegment", title: "Vertical segment", icon: WholeWord },
+  { tool: "parallel", title: "Parallel lines", icon: Brush },
+  { tool: "arrow", title: "Arrow", icon: ArrowUpRight },
+  { tool: "priceLine", title: "Price line", icon: Ruler },
+  { tool: "text", title: "Text", icon: TextCursorInput },
+  { tool: "rectangle", title: "Rectangle", icon: Square },
+  { tool: "fibonacci", title: "Fibonacci retracement", icon: Ruler }
+];
+
+const toolActions: Array<{ action: DrawingAction; title: string; icon: typeof MousePointer2 }> = [
+  { action: "lock", title: "Lock all drawings", icon: Lock },
+  { action: "hide", title: "Hide all drawings", icon: EyeOff },
+  { action: "clear", title: "Clear all drawings", icon: Trash2 }
+];
+
+const periodOptions: Array<{ value: ChartPeriod; label: string }> = [
+  { value: "1m", label: "1分" },
+  { value: "5m", label: "5分" },
+  { value: "15m", label: "15分" },
+  { value: "30m", label: "30分" },
+  { value: "60m", label: "1小时" },
+  { value: "1d", label: "日" },
+  { value: "1w", label: "周" },
+  { value: "1M", label: "月" }
 ];
 
 const lineColors = ["#f59e0b", "#38bdf8", "#c084fc", "#22c55e", "#f97316", "#e879f9", "#60a5fa"];
@@ -170,6 +199,10 @@ function formatMeasure(start: DrawingPoint, end: DrawingPoint): string {
   return `${priceDelta.toFixed(2)} / ${percent.toFixed(2)}%`;
 }
 
+function rowTime(row: ChartBar): Time {
+  return (row.chart_time ?? row.trade_date) as Time;
+}
+
 export function KLineChart(props: KLineChartProps) {
   const {
     rows,
@@ -179,6 +212,8 @@ export function KLineChart(props: KLineChartProps) {
     boardError,
     enabledIndicators,
     onIndicatorsChange,
+    period = "1d",
+    onPeriodChange,
     indicatorStatus,
     indicatorError,
     loading,
@@ -199,7 +234,9 @@ export function KLineChart(props: KLineChartProps) {
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [activeTool, setActiveTool] = useState<DrawingTool>("cursor");
+  const [activeTool, setActiveTool] = useState<DrawingTool>("crosshair");
+  const [drawingsLocked, setDrawingsLocked] = useState(false);
+  const [drawingsHidden, setDrawingsHidden] = useState(false);
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [draftDrawing, setDraftDrawing] = useState<Drawing | null>(null);
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
@@ -244,7 +281,7 @@ export function KLineChart(props: KLineChartProps) {
   function lineData(field: string) {
     return chartRows
       .filter((row) => numericValue(row, field) !== null)
-      .map((row) => ({ time: row.trade_date, value: numericValue(row, field) ?? 0 }));
+      .map((row) => ({ time: rowTime(row), value: numericValue(row, field) ?? 0 }));
   }
 
   function pointFromEvent(event: PointerEvent<SVGSVGElement>): DrawingPoint | null {
@@ -293,19 +330,28 @@ export function KLineChart(props: KLineChartProps) {
     onSelectSymbol?.(symbol);
   }
 
-  function handleToolClick(tool: DrawingTool | "clear") {
-    if (tool === "clear") {
-      setDrawings([]);
-      setDraftDrawing(null);
-      setActiveTool("cursor");
-      return;
-    }
+  function handleToolClick(tool: DrawingTool) {
     setActiveTool(tool);
     setDraftDrawing(null);
   }
 
+  function handleToolAction(action: DrawingAction) {
+    if (action === "lock") {
+      setDrawingsLocked((locked) => !locked);
+      setDraftDrawing(null);
+      return;
+    }
+    if (action === "hide") {
+      setDrawingsHidden((hidden) => !hidden);
+      setDraftDrawing(null);
+      return;
+    }
+    setDrawings([]);
+    setDraftDrawing(null);
+  }
+
   function handleDrawingPointerDown(event: PointerEvent<SVGSVGElement>) {
-    if (activeTool === "cursor") {
+    if (activeTool === "crosshair" || drawingsLocked) {
       return;
     }
     const point = pointFromEvent(event);
@@ -332,9 +378,6 @@ export function KLineChart(props: KLineChartProps) {
     setDraftDrawing((current) => {
       if (!current) {
         return current;
-      }
-      if (current.kind === "brush") {
-        return { ...current, points: [...current.points, point] };
       }
       return { ...current, points: [current.points[0], point] };
     });
@@ -408,7 +451,7 @@ export function KLineChart(props: KLineChartProps) {
         horzLines: { color: "rgba(159, 176, 189, 0.12)" }
       },
       rightPriceScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
-      timeScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
+      timeScale: { borderColor: "rgba(159, 176, 189, 0.2)", visible: paneIndicators.length === 0 },
       crosshair: { mode: 1 }
     });
     allCharts.push(mainChart);
@@ -425,7 +468,7 @@ export function KLineChart(props: KLineChartProps) {
     candleSeriesRef.current = candles;
     candles.setData(
       chartRows.map((row) => ({
-        time: row.trade_date,
+        time: rowTime(row),
         open: row.open ?? 0,
         high: row.high ?? 0,
         low: row.low ?? 0,
@@ -444,7 +487,7 @@ export function KLineChart(props: KLineChartProps) {
       });
       volume.setData(
         chartRows.map((row) => ({
-          time: row.trade_date,
+          time: rowTime(row),
           value: row.volume ?? 0,
           color: (row.close ?? 0) >= (row.open ?? 0) ? "rgba(239, 68, 68, 0.38)" : "rgba(34, 197, 94, 0.38)"
         }))
@@ -481,7 +524,10 @@ export function KLineChart(props: KLineChartProps) {
           horzLines: { color: "rgba(159, 176, 189, 0.11)" }
         },
         rightPriceScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
-        timeScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
+        timeScale: {
+          borderColor: "rgba(159, 176, 189, 0.2)",
+          visible: indicatorIndex === paneIndicators.length - 1
+        },
         crosshair: { mode: 1 }
       });
       allCharts.push(paneChart);
@@ -495,9 +541,9 @@ export function KLineChart(props: KLineChartProps) {
           });
           series.setData(
             chartRows
-              .filter((row) => numericValue(row, field) !== null)
-              .map((row) => ({
-                time: row.trade_date,
+                .filter((row) => numericValue(row, field) !== null)
+                .map((row) => ({
+                time: rowTime(row),
                 value: numericValue(row, field) ?? 0,
                 color: (numericValue(row, field) ?? 0) >= 0 ? "rgba(239, 68, 68, 0.7)" : "rgba(34, 197, 94, 0.7)"
               }))
@@ -538,16 +584,14 @@ export function KLineChart(props: KLineChartProps) {
       return null;
     }
     const className = isDraft ? "chart-drawing draft" : "chart-drawing";
-    if (drawing.kind === "horizontal") {
-      return <line key={drawing.id} className={className} x1={0} x2={overlaySize.width} y1={points[0].y} y2={points[0].y} />;
-    }
-    if (drawing.kind === "vertical") {
-      return <line key={drawing.id} className={className} x1={points[0].x} x2={points[0].x} y1={0} y2={overlaySize.height} />;
-    }
-    if (drawing.kind === "brush") {
-      const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
-      return <path key={drawing.id} className={className} d={path} />;
-    }
+    const start = points[0];
+    const end = points[1] ?? points[0];
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    const priceText = drawing.points[0]?.price.toFixed(2) ?? "";
+
     if (drawing.kind === "text") {
       return (
         <text key={drawing.id} className="chart-drawing-text" x={points[0].x + 8} y={points[0].y - 8}>
@@ -555,16 +599,81 @@ export function KLineChart(props: KLineChartProps) {
         </text>
       );
     }
-    const start = points[0];
-    const end = points[1] ?? points[0];
+
+    if (drawing.kind === "horizontalSegment") {
+      return <line key={drawing.id} className={className} x1={start.x} y1={start.y} x2={end.x} y2={start.y} />;
+    }
+
+    if (drawing.kind === "verticalSegment") {
+      return <line key={drawing.id} className={className} x1={start.x} y1={start.y} x2={start.x} y2={end.y} />;
+    }
+
+    if (drawing.kind === "priceLine") {
+      return (
+        <g key={drawing.id}>
+          <line className={className} x1={0} y1={start.y} x2={overlaySize.width} y2={start.y} />
+          <text className="chart-price-label" x={Math.max(8, overlaySize.width - 62)} y={start.y - 6}>
+            {priceText}
+          </text>
+        </g>
+      );
+    }
+
+    if (drawing.kind === "rectangle") {
+      return <rect key={drawing.id} className="chart-drawing chart-drawing-fill" x={minX} y={minY} width={maxX - minX} height={maxY - minY} />;
+    }
+
+    if (drawing.kind === "parallel") {
+      const offset = 34;
+      return (
+        <g key={drawing.id}>
+          <line className={className} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
+          <line className={className} x1={start.x} y1={start.y + offset} x2={end.x} y2={end.y + offset} />
+        </g>
+      );
+    }
+
+    if (drawing.kind === "fibonacci") {
+      const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+      return (
+        <g key={drawing.id}>
+          {levels.map((level) => {
+            const y = start.y + (end.y - start.y) * level;
+            return (
+              <g key={level}>
+                <line className={className} x1={minX} y1={y} x2={maxX} y2={y} />
+                <text className="chart-fib-label" x={minX + 5} y={y - 4}>
+                  {(level * 100).toFixed(level === 0 || level === 1 ? 0 : 1)}%
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      );
+    }
+
+    if (drawing.kind === "arrow") {
+      const angle = Math.atan2(end.y - start.y, end.x - start.x);
+      const arrowLength = 12;
+      const left = {
+        x: end.x - arrowLength * Math.cos(angle - Math.PI / 6),
+        y: end.y - arrowLength * Math.sin(angle - Math.PI / 6)
+      };
+      const right = {
+        x: end.x - arrowLength * Math.cos(angle + Math.PI / 6),
+        y: end.y - arrowLength * Math.sin(angle + Math.PI / 6)
+      };
+      return (
+        <g key={drawing.id}>
+          <line className={className} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
+          <polyline className={className} points={`${left.x},${left.y} ${end.x},${end.y} ${right.x},${right.y}`} />
+        </g>
+      );
+    }
+
     return (
       <g key={drawing.id}>
         <line className={className} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
-        {drawing.kind === "measure" && drawing.points[1] && (
-          <text className="chart-measure-label" x={(start.x + end.x) / 2 + 8} y={(start.y + end.y) / 2 - 8}>
-            {formatMeasure(drawing.points[0], drawing.points[1])}
-          </text>
-        )}
       </g>
     );
   }
@@ -623,6 +732,18 @@ export function KLineChart(props: KLineChartProps) {
             </div>
           )}
         </div>
+        <div className="chart-periods" aria-label="K-line period">
+          {periodOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={option.value === period ? "active" : ""}
+              onClick={() => onPeriodChange?.(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <div className="chart-actions">
           <div className="indicator-menu-wrap">
             <button
@@ -678,6 +799,22 @@ export function KLineChart(props: KLineChartProps) {
               </button>
             );
           })}
+          <div className="tool-separator" />
+          {toolActions.map((tool) => {
+            const Icon = tool.action === "hide" && drawingsHidden ? Eye : tool.icon;
+            const active = (tool.action === "lock" && drawingsLocked) || (tool.action === "hide" && drawingsHidden);
+            return (
+              <button
+                type="button"
+                title={tool.title}
+                key={tool.action}
+                className={active ? "active" : ""}
+                onClick={() => handleToolAction(tool.action)}
+              >
+                <Icon aria-hidden="true" size={17} />
+              </button>
+            );
+          })}
         </div>
         <div className="chart-main">
           <div className={legendCollapsed ? "chart-legend collapsed" : "chart-legend"} aria-label="Chart legend">
@@ -710,7 +847,7 @@ export function KLineChart(props: KLineChartProps) {
               <div className="main-chart-wrap" style={{ height: mainChartHeight }}>
                 <div ref={mainContainerRef} className="kline-canvas" />
                 <svg
-                  className={activeTool === "cursor" ? "drawing-layer drawing-layer-passive" : "drawing-layer"}
+                  className={activeTool === "crosshair" || drawingsLocked ? "drawing-layer drawing-layer-passive" : "drawing-layer"}
                   width={overlaySize.width}
                   height={overlaySize.height}
                   viewBox={`0 0 ${overlaySize.width} ${overlaySize.height}`}
@@ -720,8 +857,8 @@ export function KLineChart(props: KLineChartProps) {
                   onPointerLeave={handleDrawingPointerUp}
                   aria-hidden="true"
                 >
-                  {drawings.map((drawing) => renderDrawing(drawing))}
-                  {draftDrawing && renderDrawing(draftDrawing, true)}
+                  {!drawingsHidden && drawings.map((drawing) => renderDrawing(drawing))}
+                  {!drawingsHidden && draftDrawing && renderDrawing(draftDrawing, true)}
                 </svg>
               </div>
               {paneIndicators.length > 0 && (

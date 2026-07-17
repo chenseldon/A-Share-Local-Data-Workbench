@@ -10,7 +10,7 @@ interface ModuleViewProps {
   data: ModuleDataResponse | null;
   loading: boolean;
   error: string | null;
-  selectedSymbol: string;
+  selectedSymbol: string | null;
   chart: ChartResponse | null;
   chartLoading: boolean;
   chartError: string | null;

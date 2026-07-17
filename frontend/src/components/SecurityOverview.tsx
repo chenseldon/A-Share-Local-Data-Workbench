@@ -1,4 +1,5 @@
 import { FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
+import type { ChartPeriod } from "../api";
 import type { BoardMappingResponse, ChartResponse, Security, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
@@ -9,7 +10,7 @@ interface SecurityOverviewProps {
   overview: SecurityOverviewType | null;
   loading: boolean;
   error: string | null;
-  selectedSymbol: string;
+  selectedSymbol: string | null;
   chart: ChartResponse | null;
   chartLoading: boolean;
   chartError: string | null;
@@ -17,6 +18,8 @@ interface SecurityOverviewProps {
   boardError: string | null;
   chartIndicators: string[];
   onChartIndicatorsChange: (indicators: string[]) => void;
+  chartPeriod: ChartPeriod;
+  onChartPeriodChange: (period: ChartPeriod) => void;
   onRefreshMarket: () => void;
   marketRefreshing: boolean;
   searchQuery: string;
@@ -24,6 +27,7 @@ interface SecurityOverviewProps {
   isSearching: boolean;
   onSearchQueryChange: (value: string) => void;
   onSelectSymbol: (symbol: string) => void;
+  apiHealthError: string | null;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -45,14 +49,60 @@ export function SecurityOverview({
   boardError,
   chartIndicators,
   onChartIndicatorsChange,
+  chartPeriod,
+  onChartPeriodChange,
   onRefreshMarket,
   marketRefreshing,
   searchQuery,
   searchResults,
   isSearching,
   onSearchQueryChange,
-  onSelectSymbol
+  onSelectSymbol,
+  apiHealthError
 }: SecurityOverviewProps) {
+  if (!selectedSymbol) {
+    return (
+      <div className="security-start-screen">
+        <section className="security-start-card">
+          <div>
+            <span className="start-eyebrow">A-Share K-Line Workspace</span>
+            <h1>Search a symbol to start</h1>
+            <p>Enter a six-digit code or Chinese name to load local free-stockdb K-line data, indicators, boards and module context.</p>
+          </div>
+          <div className="start-search-box">
+            <input
+              aria-label="Search or resolve A-share symbol"
+              value={searchQuery}
+              placeholder="输入股票代码或中文名，例如 600519 / 贵州茅台"
+              onChange={(event) => onSearchQueryChange(event.target.value)}
+            />
+            {(searchQuery || isSearching) && (
+              <div className="start-search-results">
+                {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                {!isSearching && searchResults.length === 0 && searchQuery && (
+                  <div className="start-search-row muted">No local free-stockdb match.</div>
+                )}
+                {searchResults.slice(0, 5).map((result) => (
+                  <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                    <span>{result.symbol}</span>
+                    <strong>{result.name}</strong>
+                    <small>{result.exchange}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {apiHealthError && (
+            <div className="api-diagnostic">
+              API is not reachable from this browser. Open http://127.0.0.1:5173/ and make sure the backend is running on 127.0.0.1:8000.
+              <small>{apiHealthError}</small>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   if (loading) {
     return <div className="panel loading-panel">Loading local security context...</div>;
   }
@@ -80,6 +130,8 @@ export function SecurityOverview({
         boardError={boardError}
         enabledIndicators={chartIndicators}
         onIndicatorsChange={onChartIndicatorsChange}
+        period={chartPeriod}
+        onPeriodChange={onChartPeriodChange}
         indicatorStatus={chart?.indicator_status}
         indicatorError={chart?.indicator_error ?? null}
         loading={chartLoading}
