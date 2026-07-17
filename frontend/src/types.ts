@@ -72,6 +72,18 @@ export interface MarketQuote {
   amount: number | null;
   bid1: number | null;
   ask1: number | null;
+  change_amt?: number | null;
+  change_pct?: number | null;
+  turnover_pct?: number | null;
+  pe_ttm?: number | null;
+  amplitude_pct?: number | null;
+  total_market_cap?: number | null;
+  float_market_cap?: number | null;
+  pb?: number | null;
+  limit_up?: number | null;
+  limit_down?: number | null;
+  volume_ratio?: number | null;
+  pe_static?: number | null;
   source: string;
   fetched_at: string;
 }

@@ -236,7 +236,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
                     frequency=period,
                     fq=_indicator_adjustment(adjustment),
                 )
-                _merge_indicator_rows(rows, indicator_rows)
+                _merge_indicator_rows(rows, indicator_rows, requested_indicators)
                 indicator_status = "fresh"
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -477,11 +477,49 @@ def _indicator_adjustment(adjustment: str) -> str | None:
     return adjustment
 
 
-def _merge_indicator_rows(rows: list[dict[str, object]], indicator_rows: dict[str, dict[str, object]]) -> None:
-    for row in rows:
+def _merge_indicator_rows(
+    rows: list[dict[str, object]],
+    indicator_rows: dict[str, dict[str, object]],
+    requested_indicators: tuple[str, ...] = (),
+) -> None:
+    ordered_indicator_values = [values for _, values in sorted(indicator_rows.items(), key=lambda item: item[0])]
+    expected_fields = _requested_indicator_fields(requested_indicators, ordered_indicator_values)
+    positional_fallback = len(ordered_indicator_values) == len(rows)
+
+    for index, row in enumerate(rows):
         trade_date = row.get("trade_date")
         if trade_date is None:
             continue
         values = indicator_rows.get(str(trade_date)) or indicator_rows.get(str(trade_date)[:10])
+        if values is None and positional_fallback:
+            values = ordered_indicator_values[index]
         if values:
             row.update(values)
+        for field in expected_fields:
+            row.setdefault(field, None)
+
+
+def _requested_indicator_fields(
+    requested_indicators: tuple[str, ...],
+    indicator_values: list[dict[str, object]],
+) -> set[str]:
+    fields = {key for values in indicator_values for key in values.keys()}
+    default_fields: dict[str, set[str]] = {
+        "ma": {"ma5", "ma10", "ma20"},
+        "ema": {"ema5", "ema10", "ema20", "ema"},
+        "sma": {"sma5", "sma10", "sma20", "sma"},
+        "wma": {"wma5", "wma10", "wma20", "wma"},
+        "dma": {"dma10", "dma"},
+        "std": {"std20", "std"},
+        "sum": {"sum20", "sum"},
+        "hhv": {"hhv20", "hhv"},
+        "llv": {"llv20", "llv"},
+        "ref": {"ref1", "ref"},
+        "macd": {"dif", "dea", "macd"},
+        "kdj": {"k", "d", "j"},
+        "rsi": {"rsi", "rsi6", "rsi12", "rsi24"},
+        "boll": {"upper", "mid", "lower"},
+    }
+    for indicator in requested_indicators:
+        fields.update(default_fields.get(indicator.lower(), set()))
+    return fields

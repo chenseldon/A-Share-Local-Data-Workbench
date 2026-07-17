@@ -32,6 +32,8 @@
 - K-line drawing tools are front-end session state only. Cursor mode leaves chart drag/zoom behavior available; drawing modes write SVG overlay objects against main-chart time and price coordinates and do not persist to DuckDB.
 - Security View no longer defaults to `600519.SH` on first load. It starts from a dark symbol-search landing screen, then enters the K-line workspace only after the user selects a local free-stockdb candidate.
 - Chart periods use free-stockdb native frequencies only: `1m`, `5m`, `15m`, `30m`, `60m`, `1d`, `1w`, and `1M`; `4h` is intentionally not shown because the local SDK does not expose it as a native period.
+- Weekly and monthly K-line indicators are kept enabled. free-stockdb may return indicator dates at period starts while aggregated K-line bars use period-end dates, so the backend merges indicators by exact date first and falls back to sorted positional alignment when row counts match.
+- Security View chart legends show the hovered bar's OHLCV and selected indicator values, and the custom front-end crosshair overlay spans the main chart plus indicator panes.
 - Browser access remains local-only through `http://127.0.0.1:5173/`. CORS includes localhost IPv4 and IPv6, and `start_workbench.ps1` checks `/api/health` when port 8000 is already occupied to distinguish a reusable backend from a stale conflicting process.
 
 ## Secrets

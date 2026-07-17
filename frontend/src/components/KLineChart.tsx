@@ -91,6 +91,15 @@ interface Drawing {
   text?: string;
 }
 
+interface CrosshairState {
+  x: number;
+  y: number;
+  rowIndex: number;
+  row: ChartBar;
+  valueLabel: string;
+  timeLabel: string;
+}
+
 const indicatorOptions: IndicatorOption[] = [
   { id: "ma", label: "MA", placement: "overlay", fields: ["ma5", "ma10", "ma20"], color: "#f59e0b", description: "Moving average" },
   { id: "ema", label: "EMA", placement: "overlay", fields: ["ema5", "ema10", "ema20", "ema"], color: "#38bdf8", description: "Exponential moving average" },
@@ -203,6 +212,33 @@ function rowTime(row: ChartBar): Time {
   return (row.chart_time ?? row.trade_date) as Time;
 }
 
+function formatLegendNumber(value: number | null | undefined, maximumFractionDigits = 2): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "NA";
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits });
+}
+
+function formatVolume(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "NA";
+  }
+  if (Math.abs(value) >= 100_000_000) {
+    return `${(value / 100_000_000).toFixed(2)}亿`;
+  }
+  if (Math.abs(value) >= 10_000) {
+    return `${(value / 10_000).toFixed(2)}万`;
+  }
+  return value.toLocaleString();
+}
+
+function rowChangePercent(row: ChartBar): number | null {
+  if (row.open === null || row.open === undefined || row.open === 0 || row.close === null || row.close === undefined) {
+    return null;
+  }
+  return ((row.close - row.open) / row.open) * 100;
+}
+
 export function KLineChart(props: KLineChartProps) {
   const {
     rows,
@@ -227,6 +263,7 @@ export function KLineChart(props: KLineChartProps) {
     onSelectSymbol
   } = props;
   const mainContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartStackRef = useRef<HTMLDivElement | null>(null);
   const paneContainerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const mainChartRef = useRef<IChartApi | null>(null);
@@ -239,6 +276,7 @@ export function KLineChart(props: KLineChartProps) {
   const [drawingsHidden, setDrawingsHidden] = useState(false);
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [draftDrawing, setDraftDrawing] = useState<Drawing | null>(null);
+  const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
   const [, setOverlayVersion] = useState(0);
   const chartRows = useMemo(
@@ -266,6 +304,15 @@ export function KLineChart(props: KLineChartProps) {
   const primarySector = boards?.sw_l1[0] ?? security?.sector ?? "No sector";
   const conceptPreview = boards?.concepts.slice(0, 3) ?? [];
   const visibleSearchResults = searchResults.slice(0, 5);
+  const legendRow = crosshair?.row ?? chartRows[chartRows.length - 1] ?? null;
+  const legendChange = legendRow ? rowChangePercent(legendRow) : null;
+  const indicatorLegendRows = selectedIndicators
+    .filter((indicator) => indicator.id !== "volume")
+    .map((indicator) => ({
+      indicator,
+      fields: firstAvailableFields(chartRows, indicator.fields)
+    }))
+    .filter((item) => item.fields.length > 0);
 
   function indicatorEnabled(name: string): boolean {
     return enabledIndicators.includes(name);
@@ -389,6 +436,60 @@ export function KLineChart(props: KLineChartProps) {
     }
     setDrawings((current) => [...current, draftDrawing]);
     setDraftDrawing(null);
+  }
+
+  function handleChartPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (activeTool !== "crosshair") {
+      return;
+    }
+    const chart = mainChartRef.current;
+    const series = candleSeriesRef.current;
+    const mainContainer = mainContainerRef.current;
+    const stack = chartStackRef.current;
+    if (!chart || !series || !mainContainer || !stack || chartRows.length === 0) {
+      return;
+    }
+    const mainRect = mainContainer.getBoundingClientRect();
+    const stackRect = stack.getBoundingClientRect();
+    const x = event.clientX - mainRect.left;
+    const logical = chart.timeScale().coordinateToLogical(x);
+    if (logical === null) {
+      setCrosshair(null);
+      return;
+    }
+    const rowIndex = Math.max(0, Math.min(chartRows.length - 1, Math.round(logical)));
+    const row = chartRows[rowIndex];
+    const stackY = event.clientY - stackRect.top;
+    const mainY = event.clientY - mainRect.top;
+    const price = mainY >= 0 && mainY <= mainRect.height ? series.coordinateToPrice(mainY) : null;
+    let valueLabel = formatLegendNumber(price ?? row.close);
+    if (price === null) {
+      for (const indicator of paneIndicators) {
+        const pane = paneContainerRefs.current[indicator.id];
+        if (!pane) {
+          continue;
+        }
+        const paneRect = pane.getBoundingClientRect();
+        if (event.clientY < paneRect.top || event.clientY > paneRect.bottom) {
+          continue;
+        }
+        const field = firstAvailableFields(chartRows, indicator.fields)[0];
+        valueLabel = field ? formatLegendNumber(numericValue(row, field), 3) : "NA";
+        break;
+      }
+    }
+    setCrosshair({
+      x,
+      y: Math.max(0, Math.min(stackRect.height, stackY)),
+      rowIndex,
+      row,
+      valueLabel,
+      timeLabel: row.trade_date
+    });
+  }
+
+  function clearCrosshair() {
+    setCrosshair(null);
   }
 
   useEffect(() => {
@@ -827,14 +928,42 @@ export function KLineChart(props: KLineChartProps) {
               {legendCollapsed ? <Plus aria-hidden="true" size={14} /> : <ChevronUp aria-hidden="true" size={14} />}
             </button>
             {!legendCollapsed && (
-              <>
-                {selectedIndicators.map((indicator) => (
-                  <span className="legend-item" key={indicator.id} style={{ "--legend-color": indicator.color } as CSSProperties}>
-                    {indicator.label}
-                  </span>
-                ))}
+              <div className="legend-content">
+                <div className="legend-quote-row">
+                  <strong>{security?.symbol ?? "K-Line"}</strong>
+                  {security?.name && <span>{security.name}</span>}
+                  <span>{periodOptions.find((option) => option.value === period)?.label ?? period}</span>
+                  {legendRow && (
+                    <>
+                      <span>开 {formatLegendNumber(legendRow.open)}</span>
+                      <span>高 {formatLegendNumber(legendRow.high)}</span>
+                      <span>低 {formatLegendNumber(legendRow.low)}</span>
+                      <span>收 {formatLegendNumber(legendRow.close)}</span>
+                      <span className={legendChange !== null && legendChange >= 0 ? "legend-up" : "legend-down"}>
+                        {legendChange === null ? "涨跌 NA" : `${legendChange >= 0 ? "+" : ""}${legendChange.toFixed(2)}%`}
+                      </span>
+                      <span>成交量 {formatVolume(legendRow.volume)}</span>
+                    </>
+                  )}
+                </div>
+                {indicatorLegendRows.length > 0 && (
+                  <div className="legend-indicator-grid">
+                    {indicatorLegendRows.map(({ indicator, fields }) => (
+                      <div className="legend-indicator-row" key={indicator.id}>
+                        <span className="legend-item" style={{ "--legend-color": indicator.color } as CSSProperties}>
+                          {indicator.label}
+                        </span>
+                        {fields.map((field) => (
+                          <small key={field}>
+                            {field} {legendRow ? formatLegendNumber(numericValue(legendRow, field), 3) : "NA"}
+                          </small>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {indicatorStatus === "failed" && <span className="chart-warning">{indicatorError ?? "Indicator calculation failed"}</span>}
-              </>
+              </div>
             )}
           </div>
           {loading && <div className="chart-empty">Loading free-stockdb K-line...</div>}
@@ -843,7 +972,24 @@ export function KLineChart(props: KLineChartProps) {
             <div className="chart-empty">No free-stockdb K-line data yet. Use Refresh market after stockdb.exe is running.</div>
           )}
           {!loading && !error && chartRows.length > 0 && (
-            <div className="chart-stack">
+            <div
+              ref={chartStackRef}
+              className="chart-stack"
+              onPointerMove={handleChartPointerMove}
+              onPointerLeave={clearCrosshair}
+            >
+              {crosshair && (
+                <div className="chart-crosshair-layer" aria-hidden="true">
+                  <span className="chart-crosshair-x" style={{ left: crosshair.x }} />
+                  <span className="chart-crosshair-y" style={{ top: crosshair.y }} />
+                  <span className="chart-crosshair-price" style={{ top: crosshair.y }}>
+                    {crosshair.valueLabel}
+                  </span>
+                  <span className="chart-crosshair-time" style={{ left: crosshair.x }}>
+                    {crosshair.timeLabel}
+                  </span>
+                </div>
+              )}
               <div className="main-chart-wrap" style={{ height: mainChartHeight }}>
                 <div ref={mainContainerRef} className="kline-canvas" />
                 <svg

@@ -1,10 +1,8 @@
-import { FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
 import type { ChartPeriod } from "../api";
-import type { BoardMappingResponse, ChartResponse, Security, SecurityOverview as SecurityOverviewType } from "../types";
+import type { BoardMappingResponse, ChartResponse, DataRow, Security, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
-import { StatusBadge } from "./StatusBadge";
 
 interface SecurityOverviewProps {
   overview: SecurityOverviewType | null;
@@ -30,11 +28,36 @@ interface SecurityOverviewProps {
   apiHealthError: string | null;
 }
 
-function formatNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "-";
+function formatSnapshotValue(value: number | string | null | undefined, suffix = ""): string {
+  if (value === null || value === undefined || value === "") {
+    return "NA";
   }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (typeof value === "number") {
+    return `${Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
+  }
+  return `${value}${suffix}`;
+}
+
+function renderLinkedTitle(value: unknown, column: { key: string }, row: DataRow) {
+  if (column.key !== "title") {
+    if (value === null || value === undefined) {
+      return "-";
+    }
+    if (typeof value === "number") {
+      return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    }
+    return String(value);
+  }
+  const title = value === null || value === undefined ? "-" : String(value);
+  const url = typeof row.url === "string" && row.url ? row.url : null;
+  if (!url) {
+    return title;
+  }
+  return (
+    <a className="table-title-link" href={url} target="_blank" rel="noreferrer">
+      {title}
+    </a>
+  );
 }
 
 export function SecurityOverview({
@@ -145,97 +168,74 @@ export function SecurityOverview({
         onSelectSymbol={onSelectSymbol}
       />
 
-      <section className="metric-row">
-        <div className="metric-panel">
-          <LineChart aria-hidden="true" size={18} />
-          <span>Latest Price</span>
-          <strong>{formatNumber(overview.quote?.last_price ?? overview.market?.close)}</strong>
-          <small>{overview.quote?.price_time ?? overview.market?.trade_date ?? "No market data"}</small>
-        </div>
-        <div className="metric-panel">
-          <FileText aria-hidden="true" size={18} />
-          <span>PE TTM</span>
-          <strong>{formatNumber(overview.fundamentals?.pe_ttm)}</strong>
-          <small>{overview.fundamentals?.report_period ?? "No fundamentals"}</small>
-        </div>
-        <div className="metric-panel">
-          <WalletCards aria-hidden="true" size={18} />
-          <span>Main Inflow</span>
-          <strong>{formatNumber(overview.money_flow[0]?.main_net_inflow)}</strong>
-          <small>{overview.money_flow[0]?.trade_date ?? "No money flow"}</small>
-        </div>
-        <div className="metric-panel">
-          <Newspaper aria-hidden="true" size={18} />
-          <span>Local Events</span>
-          <strong>{overview.announcements.length + overview.reports.length}</strong>
-          <small>Announcements + reports</small>
-        </div>
-      </section>
-
-      <section className="panel split-panel">
-        <div>
-          <h2>Freshness</h2>
-          <p>Local collection state by module.</p>
-        </div>
-        <div className="freshness-grid">
-          {Object.entries(overview.freshness).map(([key, status]) => (
-            <div key={key} className="freshness-item">
-              <span>{key.replaceAll("_", " ")}</span>
-              <StatusBadge status={status} />
+      {overview.quote && (
+        <section className="panel market-snapshot-panel">
+          <div className="section-heading">
+            <div>
+              <h2>Market Snapshot</h2>
+              <p>Latest local quote fields. Missing values are shown as NA.</p>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Latest Quote</h2>
-            <p>Latest cached public-source quote. Refreshing writes to DuckDB before display.</p>
           </div>
-        </div>
-        <DataTable rows={overview.quote ? [overview.quote] : []} />
-      </section>
-
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Market Bars</h2>
-            <p>Source, trade date, adjustment and fetch time are shown with each local row.</p>
+          <div className="snapshot-grid">
+            <div><span>换手率</span><strong>{formatSnapshotValue(overview.quote.turnover_pct, "%")}</strong></div>
+            <div><span>涨幅%</span><strong>{formatSnapshotValue(overview.quote.change_pct, "%")}</strong></div>
+            <div><span>振幅%</span><strong>{formatSnapshotValue(overview.quote.amplitude_pct, "%")}</strong></div>
+            <div><span>量比</span><strong>{formatSnapshotValue(overview.quote.volume_ratio)}</strong></div>
+            <div><span>总股本</span><strong>NA</strong></div>
+            <div><span>流通股本</span><strong>NA</strong></div>
+            <div><span>总市值</span><strong>{formatSnapshotValue(overview.quote.total_market_cap)}</strong></div>
+            <div><span>流通市值</span><strong>{formatSnapshotValue(overview.quote.float_market_cap)}</strong></div>
+            <div><span>市盈率</span><strong>{formatSnapshotValue(overview.quote.pe_ttm ?? overview.quote.pe_static)}</strong></div>
+            <div><span>市净率</span><strong>{formatSnapshotValue(overview.quote.pb)}</strong></div>
           </div>
-        </div>
-        <DataTable rows={overview.market ? [overview.market] : []} />
-      </section>
+        </section>
+      )}
 
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Fundamentals</h2>
-            <p>Fetched on confirmed symbol refresh when the upstream connector is available.</p>
+      {overview.announcements.length > 0 && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>Announcements</h2>
+              <p>Fetched on confirmed symbol refresh; titles link to the source page when available.</p>
+            </div>
           </div>
-        </div>
-        <DataTable rows={overview.fundamentals ? [overview.fundamentals] : []} />
-      </section>
+          <DataTable
+            rows={overview.announcements}
+            columns={[
+              { key: "symbol", label: "SYMBOL" },
+              { key: "title", label: "TITLE" },
+              { key: "published_at", label: "PUBLISHED AT" },
+              { key: "source", label: "SOURCE" },
+              { key: "fetched_at", label: "FETCHED AT" }
+            ]}
+            renderCell={renderLinkedTitle}
+          />
+        </section>
+      )}
 
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Announcements</h2>
-            <p>Fetched on confirmed symbol refresh; unavailable upstream data is shown as an empty state.</p>
+      {overview.reports.length > 0 && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>Research Reports</h2>
+              <p>Fetched on confirmed symbol refresh; titles link to the source page when available.</p>
+            </div>
           </div>
-        </div>
-        <DataTable rows={overview.announcements} />
-      </section>
-
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Research Reports</h2>
-            <p>Fetched on confirmed symbol refresh; results keep source and fetch timestamp fields.</p>
-          </div>
-        </div>
-        <DataTable rows={overview.reports} />
-      </section>
+          <DataTable
+            rows={overview.reports}
+            columns={[
+              { key: "symbol", label: "SYMBOL" },
+              { key: "title", label: "TITLE" },
+              { key: "institution", label: "INSTITUTION" },
+              { key: "analyst", label: "ANALYST" },
+              { key: "rating", label: "RATING" },
+              { key: "report_date", label: "REPORT DATE" },
+              { key: "source", label: "SOURCE" }
+            ]}
+            renderCell={renderLinkedTitle}
+          />
+        </section>
+      )}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { DataRow } from "../types";
 
 interface Column {
@@ -9,6 +10,7 @@ interface DataTableProps {
   rows: ReadonlyArray<object>;
   columns?: Column[];
   emptyLabel?: string;
+  renderCell?: (value: unknown, column: Column, row: DataRow) => ReactNode;
 }
 
 function formatCell(value: unknown): string {
@@ -41,7 +43,7 @@ function inferColumns(rows: ReadonlyArray<object>): Column[] {
   }));
 }
 
-export function DataTable({ rows, columns, emptyLabel = "No local data yet." }: DataTableProps) {
+export function DataTable({ rows, columns, emptyLabel = "No local data yet.", renderCell }: DataTableProps) {
   const resolvedColumns = columns ?? inferColumns(rows);
 
   if (rows.length === 0) {
@@ -61,9 +63,11 @@ export function DataTable({ rows, columns, emptyLabel = "No local data yet." }: 
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${String((row as DataRow).id ?? (row as DataRow).symbol ?? "row")}-${index}`}>
-              {resolvedColumns.map((column) => (
-                <td key={column.key}>{formatCell((row as DataRow)[column.key] ?? null)}</td>
-              ))}
+              {resolvedColumns.map((column) => {
+                const typedRow = row as DataRow;
+                const value = typedRow[column.key] ?? null;
+                return <td key={column.key}>{renderCell ? renderCell(value, column, typedRow) : formatCell(value)}</td>;
+              })}
             </tr>
           ))}
         </tbody>

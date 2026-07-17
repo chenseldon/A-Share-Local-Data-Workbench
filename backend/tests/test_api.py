@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
 from app.demo_data import seed_demo_data
-from app.main import create_app
+from app.main import _merge_indicator_rows, create_app
 from app.repository import DataRepository
 
 
@@ -392,6 +392,24 @@ def test_chart_period_uses_free_stockdb_frequency(tmp_path: Path, monkeypatch) -
 
         invalid = client.get("/api/security/600004.SH/chart?period=4h")
         assert invalid.status_code == 422
+
+
+def test_indicator_merge_falls_back_to_position_and_fills_requested_fields() -> None:
+    rows: list[dict[str, object]] = [
+        {"trade_date": "2026-07-10", "close": 6.9},
+        {"trade_date": "2026-07-16", "close": 6.91},
+    ]
+    indicator_rows = {
+        "2026-07-06": {"dif": -0.03, "dea": -0.02, "macd": -0.01},
+        "2026-07-13": {"dif": -0.04, "dea": -0.03, "macd": -0.02, "rsi": 54.0},
+    }
+
+    _merge_indicator_rows(rows, indicator_rows, ("macd", "rsi"))
+
+    assert rows[0]["macd"] == -0.01
+    assert rows[0]["rsi"] is None
+    assert rows[1]["macd"] == -0.02
+    assert rows[1]["rsi"] == 54.0
 
 
 def test_boards_endpoint_updates_security_sector(tmp_path: Path, monkeypatch) -> None:
