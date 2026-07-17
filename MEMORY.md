@@ -24,6 +24,8 @@
 - Tencent quote fields include valuation and limit fields, but chart K-line rows are read only from local free-stockdb instead of Tencent/Baidu fallbacks.
 - free-stockdb integration expects `stockdb.exe` on `127.0.0.1:7899` and `stock_sdk` installed in the backend Python environment. K-line rows are stored as `source=free_stockdb_kline` and `adjustment=qfq`; on-demand indicators use `zhibiao.zb.get()` and do not persist calculated rows.
 - free-stockdb board mapping uses `zhibiao.bk.get()` for concepts and Shenwan level 1/2/3. Shenwan level 1 is the preferred `securities.sector` value when present.
+- K-line UI follows a TradingView-style split: candles, volume and overlay indicators stay in the main chart; oscillator/technical indicators such as MACD, RSI and KDJ render in separate panes to avoid lightweight-charts price-scale crashes.
+- The chart indicator menu exposes 38 single-security `zb.get()` technical indicators plus the built-in volume toggle. `zhishu` remains a basket/index calculation capability and is not shown as a single-stock chart overlay.
 - The search directory is built through `/api/securities/universe/refresh` by scanning supported A-share and ETF prefixes in free-stockdb. The old observed 7,034-symbol directory was incomplete; the refreshed scan targets 7,400+ and the 2026-07-17 local SDK scan found 7,860 candidates across 61 prefixes after adding 160-169, 501/502/506/508/520/526/530/551, 560-563 and 589.
 - Selecting a search candidate or pressing the top refresh button triggers market refresh plus best-effort fundamentals, announcements, reports, signals and chip/liquidity refresh. Slow or failed sources surface in the centered progress/toast flow rather than blocking silently.
 

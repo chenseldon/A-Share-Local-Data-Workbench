@@ -18,11 +18,8 @@ export function Sidebar({
   activeModule,
   onSelectSecurity,
   onSelectModule,
-  onSelectSystem,
-  sourceHealth
+  onSelectSystem
 }: SidebarProps) {
-  const healthByModule = new Map(sourceHealth.map((item) => [item.module, item]));
-
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -62,7 +59,6 @@ export function Sidebar({
             <span className="module-copy">
               <span>{module.label}</span>
               <small>{module.layer}</small>
-              <small>{healthByModule.get(module.id)?.updated_at ?? module.sources[0] ?? "No source"}</small>
             </span>
             <StatusBadge status={module.status} />
           </button>

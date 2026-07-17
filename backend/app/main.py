@@ -23,6 +23,7 @@ from .connectors.astock_sources import (
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
 from .connectors.public_market import (
     FREE_STOCKDB_EXPECTED_SOURCE_COUNT,
+    FREE_STOCKDB_INDICATOR_CONFIG,
     FREE_STOCKDB_UNIVERSE_PREFIXES,
     MarketDataError,
     fetch_free_stockdb_board_mapping,
@@ -397,7 +398,7 @@ def _parse_indicators(value: str | None) -> tuple[str, ...]:
         key = item.strip().lower()
         if not key:
             continue
-        if key not in {"ma", "macd", "kdj", "rsi", "boll", "volume"}:
+        if key not in FREE_STOCKDB_INDICATOR_CONFIG and key != "volume":
             raise HTTPException(status_code=400, detail=f"Unsupported chart indicator: {item}")
         if key != "volume" and key not in indicators:
             indicators.append(key)

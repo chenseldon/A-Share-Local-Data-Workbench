@@ -69,7 +69,7 @@ export default function App() {
   const [chartError, setChartError] = useState<string | null>(null);
   const [boards, setBoards] = useState<BoardMappingResponse | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
-  const [chartIndicators, setChartIndicators] = useState<string[]>(["ma", "volume"]);
+  const [chartIndicators, setChartIndicators] = useState<string[]>(["ma", "volume", "macd", "rsi"]);
   const [marketRefreshing, setMarketRefreshing] = useState(false);
   const [moduleRefreshing, setModuleRefreshing] = useState(false);
 
