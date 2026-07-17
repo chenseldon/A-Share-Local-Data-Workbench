@@ -486,6 +486,8 @@ def fetch_free_stockdb_board_mapping(symbol: str) -> BoardMapping:
         from zhibiao import bk
     except ImportError as exc:
         raise MarketDataError("free-stockdb zhibiao SDK is not installed in this Python environment.") from exc
+    except Exception as exc:
+        raise MarketDataError(f"free-stockdb board mapping SDK initialization failed: {exc}") from exc
 
     try:
         concepts = _string_list(bk.get(code, 0, "name"))

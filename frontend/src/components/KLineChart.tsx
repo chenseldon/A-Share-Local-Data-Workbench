@@ -1,24 +1,37 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
-  BarChart3,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent
+} from "react";
+import {
+  Brush,
   ChevronUp,
-  Crosshair,
-  Magnet,
+  Minus,
   MousePointer2,
-  Pencil,
   Plus,
+  RefreshCw,
   Ruler,
+  Search,
   Settings2,
   TextCursorInput,
+  Trash2,
   TrendingUp,
-  ZoomIn
+  WholeWord
 } from "lucide-react";
 import {
   CandlestickSeries,
   ColorType,
   HistogramSeries,
   LineSeries,
-  createChart
+  createChart,
+  type IChartApi,
+  type ISeriesApi,
+  type LogicalRange,
+  type LogicalRangeChangeEventHandler,
+  type Time
 } from "lightweight-charts";
 import type { BoardMappingResponse, ChartBar, MarketQuote, Security } from "../types";
 
@@ -36,9 +49,16 @@ interface KLineChartProps {
   error?: string | null;
   onRefresh?: () => void;
   refreshing?: boolean;
+  searchQuery?: string;
+  searchResults?: Security[];
+  isSearching?: boolean;
+  onSearchQueryChange?: (value: string) => void;
+  onSelectSymbol?: (symbol: string) => void;
 }
 
 type IndicatorPlacement = "overlay" | "pane" | "built_in";
+type DrawingTool = "cursor" | "trend" | "horizontal" | "vertical" | "brush" | "text" | "measure";
+type DrawingKind = Exclude<DrawingTool, "cursor">;
 
 interface IndicatorOption {
   id: string;
@@ -47,6 +67,18 @@ interface IndicatorOption {
   fields: string[];
   color: string;
   description: string;
+}
+
+interface DrawingPoint {
+  time: Time;
+  price: number;
+}
+
+interface Drawing {
+  id: string;
+  kind: DrawingKind;
+  points: DrawingPoint[];
+  text?: string;
 }
 
 const indicatorOptions: IndicatorOption[] = [
@@ -91,19 +123,19 @@ const indicatorOptions: IndicatorOption[] = [
   { id: "volume", label: "Volume", placement: "built_in", fields: ["volume"], color: "rgba(96, 165, 250, 0.42)", description: "Volume bars" }
 ];
 
-const toolButtons = [
-  { title: "Cursor", icon: MousePointer2 },
-  { title: "Crosshair", icon: Crosshair },
-  { title: "Trend line", icon: TrendingUp },
-  { title: "Brush", icon: Pencil },
-  { title: "Text note", icon: TextCursorInput },
-  { title: "Measure", icon: Ruler },
-  { title: "Magnet", icon: Magnet },
-  { title: "Zoom", icon: ZoomIn },
-  { title: "Bars", icon: BarChart3 }
+const toolButtons: Array<{ tool: DrawingTool | "clear"; title: string; icon: typeof MousePointer2 }> = [
+  { tool: "cursor", title: "Cursor", icon: MousePointer2 },
+  { tool: "trend", title: "Trend line", icon: TrendingUp },
+  { tool: "horizontal", title: "Horizontal line", icon: Minus },
+  { tool: "vertical", title: "Vertical line", icon: WholeWord },
+  { tool: "brush", title: "Brush", icon: Brush },
+  { tool: "text", title: "Text note", icon: TextCursorInput },
+  { tool: "measure", title: "Measure", icon: Ruler },
+  { tool: "clear", title: "Clear drawings", icon: Trash2 }
 ];
 
 const lineColors = ["#f59e0b", "#38bdf8", "#c084fc", "#22c55e", "#f97316", "#e879f9", "#60a5fa"];
+const mainChartBaseHeight = 690;
 
 function sourceLabel(rows: ChartBar[], quote: MarketQuote | null): string {
   if (rows.length > 0) {
@@ -124,83 +156,54 @@ function firstAvailableFields(rows: ChartBar[], fields: string[]): string[] {
   return fields.filter((field) => rows.some((row) => numericValue(row, field) !== null));
 }
 
-function seriesValues(rows: ChartBar[], fields: string[]): number[][] {
-  return fields.map((field) => rows.map((row) => numericValue(row, field) ?? Number.NaN));
+function drawingId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function linePath(values: number[], width: number, height: number, min: number, max: number): string {
-  const range = max - min || 1;
-  const points = values
-    .map((value, index) => {
-      if (!Number.isFinite(value)) {
-        return null;
-      }
-      const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
-      const y = height - ((value - min) / range) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .filter(Boolean);
-  return points.length ? `M ${points.join(" L ")}` : "";
+function hasSearchProps(props: KLineChartProps): boolean {
+  return Boolean(props.onSearchQueryChange && props.onSelectSymbol);
 }
 
-function IndicatorPane({ indicator, rows }: { indicator: IndicatorOption; rows: ChartBar[] }) {
-  const fields = firstAvailableFields(rows, indicator.fields);
-  if (fields.length === 0) {
-    return (
-      <div className="indicator-pane">
-        <div className="indicator-pane-title">
-          <span>{indicator.label}</span>
-          <small>No values returned</small>
-        </div>
-      </div>
-    );
-  }
-
-  const width = 960;
-  const height = 108;
-  const values = seriesValues(rows, fields);
-  const flat = values.flat().filter((value) => Number.isFinite(value));
-  const min = Math.min(...flat);
-  const max = Math.max(...flat);
-
-  return (
-    <div className="indicator-pane">
-      <div className="indicator-pane-title">
-        <span>{indicator.label}</span>
-        <small>{fields.join(" / ")}</small>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-        <line x1="0" y1={height / 2} x2={width} y2={height / 2} />
-        {fields.map((field, index) => (
-          <path
-            key={field}
-            d={linePath(values[index], width, height, min, max)}
-            style={{ stroke: lineColors[index % lineColors.length] }}
-          />
-        ))}
-      </svg>
-    </div>
-  );
+function formatMeasure(start: DrawingPoint, end: DrawingPoint): string {
+  const priceDelta = end.price - start.price;
+  const percent = start.price === 0 ? 0 : (priceDelta / start.price) * 100;
+  return `${priceDelta.toFixed(2)} / ${percent.toFixed(2)}%`;
 }
 
-export function KLineChart({
-  rows,
-  quote,
-  security,
-  boards,
-  boardError,
-  enabledIndicators,
-  onIndicatorsChange,
-  indicatorStatus,
-  indicatorError,
-  loading,
-  error,
-  onRefresh,
-  refreshing
-}: KLineChartProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+export function KLineChart(props: KLineChartProps) {
+  const {
+    rows,
+    quote,
+    security,
+    boards,
+    boardError,
+    enabledIndicators,
+    onIndicatorsChange,
+    indicatorStatus,
+    indicatorError,
+    loading,
+    error,
+    onRefresh,
+    refreshing,
+    searchQuery = "",
+    searchResults = [],
+    isSearching = false,
+    onSearchQueryChange,
+    onSelectSymbol
+  } = props;
+  const mainContainerRef = useRef<HTMLDivElement | null>(null);
+  const paneContainerRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const mainChartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [legendCollapsed, setLegendCollapsed] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeTool, setActiveTool] = useState<DrawingTool>("cursor");
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [draftDrawing, setDraftDrawing] = useState<Drawing | null>(null);
+  const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
+  const [, setOverlayVersion] = useState(0);
   const chartRows = useMemo(
     () =>
       rows.filter(
@@ -220,7 +223,12 @@ export function KLineChart({
   );
   const overlayIndicators = selectedIndicators.filter((indicator) => indicator.placement === "overlay");
   const paneIndicators = selectedIndicators.filter((indicator) => indicator.placement === "pane");
-  const mainChartHeight = Math.max(430, 700 - paneIndicators.length * 92);
+  const paneHeight = paneIndicators.length > 2 ? 96 : 122;
+  const mainChartHeight = Math.max(360, mainChartBaseHeight - paneIndicators.length * paneHeight);
+  const canSearch = hasSearchProps(props);
+  const primarySector = boards?.sw_l1[0] ?? security?.sector ?? "No sector";
+  const conceptPreview = boards?.concepts.slice(0, 3) ?? [];
+  const visibleSearchResults = searchResults.slice(0, 5);
 
   function indicatorEnabled(name: string): boolean {
     return enabledIndicators.includes(name);
@@ -239,18 +247,161 @@ export function KLineChart({
       .map((row) => ({ time: row.trade_date, value: numericValue(row, field) ?? 0 }));
   }
 
+  function pointFromEvent(event: PointerEvent<SVGSVGElement>): DrawingPoint | null {
+    const chart = mainChartRef.current;
+    const series = candleSeriesRef.current;
+    const container = mainContainerRef.current;
+    if (!chart || !series || !container) {
+      return null;
+    }
+    const rect = container.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const time = chart.timeScale().coordinateToTime(x);
+    const price = series.coordinateToPrice(y);
+    if (!time || price === null || !Number.isFinite(price)) {
+      return null;
+    }
+    return { time, price };
+  }
+
+  function pointToCoordinate(point: DrawingPoint): { x: number; y: number } | null {
+    const chart = mainChartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) {
+      return null;
+    }
+    const x = chart.timeScale().timeToCoordinate(point.time);
+    const y = series.priceToCoordinate(point.price);
+    if (x === null || y === null) {
+      return null;
+    }
+    return { x, y };
+  }
+
+  function beginSearch() {
+    if (!canSearch) {
+      return;
+    }
+    setSearchOpen(true);
+    onSearchQueryChange?.("");
+    window.setTimeout(() => searchInputRef.current?.focus(), 0);
+  }
+
+  function selectSearchResult(symbol: string) {
+    setSearchOpen(false);
+    onSelectSymbol?.(symbol);
+  }
+
+  function handleToolClick(tool: DrawingTool | "clear") {
+    if (tool === "clear") {
+      setDrawings([]);
+      setDraftDrawing(null);
+      setActiveTool("cursor");
+      return;
+    }
+    setActiveTool(tool);
+    setDraftDrawing(null);
+  }
+
+  function handleDrawingPointerDown(event: PointerEvent<SVGSVGElement>) {
+    if (activeTool === "cursor") {
+      return;
+    }
+    const point = pointFromEvent(event);
+    if (!point) {
+      return;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (activeTool === "text") {
+      setDrawings((current) => [...current, { id: drawingId(), kind: "text", points: [point], text: "Note" }]);
+      return;
+    }
+    const drawing: Drawing = { id: drawingId(), kind: activeTool, points: [point, point] };
+    setDraftDrawing(drawing);
+  }
+
+  function handleDrawingPointerMove(event: PointerEvent<SVGSVGElement>) {
+    if (!draftDrawing) {
+      return;
+    }
+    const point = pointFromEvent(event);
+    if (!point) {
+      return;
+    }
+    setDraftDrawing((current) => {
+      if (!current) {
+        return current;
+      }
+      if (current.kind === "brush") {
+        return { ...current, points: [...current.points, point] };
+      }
+      return { ...current, points: [current.points[0], point] };
+    });
+  }
+
+  function handleDrawingPointerUp() {
+    if (!draftDrawing) {
+      return;
+    }
+    setDrawings((current) => [...current, draftDrawing]);
+    setDraftDrawing(null);
+  }
+
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container || chartRows.length === 0) {
+    if (searchOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [searchOpen]);
+
+  useEffect(() => {
+    const container = mainContainerRef.current;
+    if (!container) {
+      return;
+    }
+    const observer = new ResizeObserver(([entry]) => {
+      setOverlaySize({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height
+      });
+      setOverlayVersion((version) => version + 1);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const mainContainer = mainContainerRef.current;
+    if (!mainContainer || chartRows.length === 0) {
+      mainChartRef.current = null;
+      candleSeriesRef.current = null;
       return;
     }
 
-    const chart = createChart(container, {
+    const allCharts: IChartApi[] = [];
+    const unsubscribeHandlers: Array<{ chart: IChartApi; handler: LogicalRangeChangeEventHandler }> = [];
+    let syncing = false;
+    const syncRange = (source: IChartApi, range: LogicalRange | null) => {
+      if (syncing || !range) {
+        return;
+      }
+      syncing = true;
+      allCharts.forEach((chart) => {
+        if (chart !== source) {
+          chart.timeScale().setVisibleLogicalRange(range);
+        }
+      });
+      syncing = false;
+      setOverlayVersion((version) => version + 1);
+    };
+
+    const mainChart = createChart(mainContainer, {
       autoSize: true,
       height: mainChartHeight,
       layout: {
         background: { type: ColorType.Solid, color: "#0f1720" },
-        textColor: "#9fb0bd"
+        textColor: "#9fb0bd",
+        attributionLogo: false
       },
       grid: {
         vertLines: { color: "rgba(159, 176, 189, 0.12)" },
@@ -260,8 +411,10 @@ export function KLineChart({
       timeScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
       crosshair: { mode: 1 }
     });
+    allCharts.push(mainChart);
+    mainChartRef.current = mainChart;
 
-    const candles = chart.addSeries(CandlestickSeries, {
+    const candles = mainChart.addSeries(CandlestickSeries, {
       upColor: "#ef4444",
       downColor: "#22c55e",
       borderUpColor: "#ef4444",
@@ -269,6 +422,7 @@ export function KLineChart({
       wickUpColor: "#ef4444",
       wickDownColor: "#22c55e"
     });
+    candleSeriesRef.current = candles;
     candles.setData(
       chartRows.map((row) => ({
         time: row.trade_date,
@@ -280,7 +434,7 @@ export function KLineChart({
     );
 
     if (indicatorEnabled("volume")) {
-      const volume = chart.addSeries(HistogramSeries, {
+      const volume = mainChart.addSeries(HistogramSeries, {
         priceFormat: { type: "volume" },
         priceScaleId: "",
         color: "rgba(96, 165, 250, 0.35)"
@@ -300,7 +454,7 @@ export function KLineChart({
     overlayIndicators.forEach((indicator, indicatorIndex) => {
       const fields = firstAvailableFields(chartRows, indicator.fields);
       fields.forEach((field, fieldIndex) => {
-        const series = chart.addSeries(LineSeries, {
+        const series = mainChart.addSeries(LineSeries, {
           color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length],
           lineWidth: 1,
           priceLineVisible: false
@@ -309,21 +463,154 @@ export function KLineChart({
       });
     });
 
-    chart.timeScale().fitContent();
-    return () => chart.remove();
-  }, [chartRows, enabledIndicators, mainChartHeight]);
+    paneIndicators.forEach((indicator, indicatorIndex) => {
+      const paneContainer = paneContainerRefs.current[indicator.id];
+      if (!paneContainer) {
+        return;
+      }
+      const paneChart = createChart(paneContainer, {
+        autoSize: true,
+        height: paneHeight,
+        layout: {
+          background: { type: ColorType.Solid, color: "#0f1720" },
+          textColor: "#9fb0bd",
+          attributionLogo: false
+        },
+        grid: {
+          vertLines: { color: "rgba(159, 176, 189, 0.11)" },
+          horzLines: { color: "rgba(159, 176, 189, 0.11)" }
+        },
+        rightPriceScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
+        timeScale: { borderColor: "rgba(159, 176, 189, 0.2)" },
+        crosshair: { mode: 1 }
+      });
+      allCharts.push(paneChart);
 
-  const primarySector = boards?.sw_l1[0] ?? security?.sector ?? "No sector";
-  const conceptPreview = boards?.concepts.slice(0, 3) ?? [];
+      const fields = firstAvailableFields(chartRows, indicator.fields);
+      fields.forEach((field, fieldIndex) => {
+        if (indicator.id === "macd" && field === "macd") {
+          const series = paneChart.addSeries(HistogramSeries, {
+            priceLineVisible: false,
+            color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length]
+          });
+          series.setData(
+            chartRows
+              .filter((row) => numericValue(row, field) !== null)
+              .map((row) => ({
+                time: row.trade_date,
+                value: numericValue(row, field) ?? 0,
+                color: (numericValue(row, field) ?? 0) >= 0 ? "rgba(239, 68, 68, 0.7)" : "rgba(34, 197, 94, 0.7)"
+              }))
+          );
+          return;
+        }
+        const series = paneChart.addSeries(LineSeries, {
+          color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length],
+          lineWidth: 1,
+          priceLineVisible: false
+        });
+        series.setData(lineData(field));
+      });
+    });
+
+    allCharts.forEach((chart) => {
+      const handler: LogicalRangeChangeEventHandler = (range) => syncRange(chart, range);
+      chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
+      unsubscribeHandlers.push({ chart, handler });
+    });
+    mainChart.timeScale().fitContent();
+    const currentRange = mainChart.timeScale().getVisibleLogicalRange();
+    if (currentRange) {
+      allCharts.slice(1).forEach((chart) => chart.timeScale().setVisibleLogicalRange(currentRange));
+    }
+
+    return () => {
+      unsubscribeHandlers.forEach(({ chart, handler }) => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler));
+      allCharts.forEach((chart) => chart.remove());
+      mainChartRef.current = null;
+      candleSeriesRef.current = null;
+    };
+  }, [chartRows, enabledIndicators, mainChartHeight, paneHeight]);
+
+  function renderDrawing(drawing: Drawing, isDraft = false) {
+    const points = drawing.points.map(pointToCoordinate).filter((point): point is { x: number; y: number } => Boolean(point));
+    if (points.length === 0) {
+      return null;
+    }
+    const className = isDraft ? "chart-drawing draft" : "chart-drawing";
+    if (drawing.kind === "horizontal") {
+      return <line key={drawing.id} className={className} x1={0} x2={overlaySize.width} y1={points[0].y} y2={points[0].y} />;
+    }
+    if (drawing.kind === "vertical") {
+      return <line key={drawing.id} className={className} x1={points[0].x} x2={points[0].x} y1={0} y2={overlaySize.height} />;
+    }
+    if (drawing.kind === "brush") {
+      const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+      return <path key={drawing.id} className={className} d={path} />;
+    }
+    if (drawing.kind === "text") {
+      return (
+        <text key={drawing.id} className="chart-drawing-text" x={points[0].x + 8} y={points[0].y - 8}>
+          {drawing.text}
+        </text>
+      );
+    }
+    const start = points[0];
+    const end = points[1] ?? points[0];
+    return (
+      <g key={drawing.id}>
+        <line className={className} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
+        {drawing.kind === "measure" && drawing.points[1] && (
+          <text className="chart-measure-label" x={(start.x + end.x) / 2 + 8} y={(start.y + end.y) / 2 - 8}>
+            {formatMeasure(drawing.points[0], drawing.points[1])}
+          </text>
+        )}
+      </g>
+    );
+  }
 
   return (
     <section className="panel chart-panel">
       <div className="section-heading chart-heading">
         <div className="chart-title-block">
-          <div className="chart-security-title">
-            <h2>{security?.symbol ?? "No symbol selected"}</h2>
-            <strong>{security?.name ?? sourceLabel(rows, quote)}</strong>
-          </div>
+          {searchOpen && canSearch ? (
+            <div className="chart-title-search">
+              <Search aria-hidden="true" size={18} />
+              <input
+                ref={searchInputRef}
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol, name, or type 600519"
+                onChange={(event) => onSearchQueryChange?.(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setSearchOpen(false);
+                    onSearchQueryChange?.("");
+                  }
+                }}
+              />
+              {searchQuery && (
+                <div className="chart-search-results">
+                  {isSearching && <div className="chart-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && visibleSearchResults.length === 0 && (
+                    <div className="chart-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {visibleSearchResults.map((result) => (
+                    <button key={result.symbol} className="chart-search-row" type="button" onClick={() => selectSearchResult(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button className="chart-security-title-button" type="button" onClick={beginSearch} disabled={!canSearch}>
+              <span>{security?.symbol ?? "No symbol selected"}</span>
+              <strong>{security?.name ?? sourceLabel(rows, quote)}</strong>
+            </button>
+          )}
           {security && (
             <div className="chart-security-meta">
               <span>{security.exchange}</span>
@@ -369,6 +656,7 @@ export function KLineChart({
           </div>
           {onRefresh && (
             <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
+              <RefreshCw aria-hidden="true" size={15} />
               {refreshing ? "Refreshing" : "Refresh market"}
             </button>
           )}
@@ -379,7 +667,13 @@ export function KLineChart({
           {toolButtons.map((tool) => {
             const Icon = tool.icon;
             return (
-              <button type="button" title={tool.title} key={tool.title}>
+              <button
+                type="button"
+                title={tool.title}
+                key={tool.title}
+                className={tool.tool === activeTool ? "active" : ""}
+                onClick={() => handleToolClick(tool.tool)}
+              >
                 <Icon aria-hidden="true" size={17} />
               </button>
             );
@@ -412,14 +706,46 @@ export function KLineChart({
             <div className="chart-empty">No free-stockdb K-line data yet. Use Refresh market after stockdb.exe is running.</div>
           )}
           {!loading && !error && chartRows.length > 0 && (
-            <>
-              <div ref={containerRef} className="kline-canvas" />
-              <div className="indicator-pane-stack">
-                {paneIndicators.map((indicator) => (
-                  <IndicatorPane key={indicator.id} indicator={indicator} rows={chartRows} />
-                ))}
+            <div className="chart-stack">
+              <div className="main-chart-wrap" style={{ height: mainChartHeight }}>
+                <div ref={mainContainerRef} className="kline-canvas" />
+                <svg
+                  className={activeTool === "cursor" ? "drawing-layer drawing-layer-passive" : "drawing-layer"}
+                  width={overlaySize.width}
+                  height={overlaySize.height}
+                  viewBox={`0 0 ${overlaySize.width} ${overlaySize.height}`}
+                  onPointerDown={handleDrawingPointerDown}
+                  onPointerMove={handleDrawingPointerMove}
+                  onPointerUp={handleDrawingPointerUp}
+                  onPointerLeave={handleDrawingPointerUp}
+                  aria-hidden="true"
+                >
+                  {drawings.map((drawing) => renderDrawing(drawing))}
+                  {draftDrawing && renderDrawing(draftDrawing, true)}
+                </svg>
               </div>
-            </>
+              {paneIndicators.length > 0 && (
+                <div className="indicator-pane-stack">
+                  {paneIndicators.map((indicator) => {
+                    const fields = firstAvailableFields(chartRows, indicator.fields);
+                    return (
+                      <div className="indicator-pane" key={indicator.id} style={{ height: paneHeight }}>
+                        <div className="indicator-pane-title">
+                          <span>{indicator.label}</span>
+                          <small>{fields.length ? fields.join(" / ") : "No values returned"}</small>
+                        </div>
+                        <div
+                          className="indicator-pane-canvas"
+                          ref={(node) => {
+                            paneContainerRefs.current[indicator.id] = node;
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

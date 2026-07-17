@@ -1,5 +1,5 @@
 import { FileText, LineChart, Newspaper, WalletCards } from "lucide-react";
-import type { BoardMappingResponse, ChartResponse, SecurityOverview as SecurityOverviewType } from "../types";
+import type { BoardMappingResponse, ChartResponse, Security, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
@@ -19,6 +19,11 @@ interface SecurityOverviewProps {
   onChartIndicatorsChange: (indicators: string[]) => void;
   onRefreshMarket: () => void;
   marketRefreshing: boolean;
+  searchQuery: string;
+  searchResults: Security[];
+  isSearching: boolean;
+  onSearchQueryChange: (value: string) => void;
+  onSelectSymbol: (symbol: string) => void;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -41,7 +46,12 @@ export function SecurityOverview({
   chartIndicators,
   onChartIndicatorsChange,
   onRefreshMarket,
-  marketRefreshing
+  marketRefreshing,
+  searchQuery,
+  searchResults,
+  isSearching,
+  onSearchQueryChange,
+  onSelectSymbol
 }: SecurityOverviewProps) {
   if (loading) {
     return <div className="panel loading-panel">Loading local security context...</div>;
@@ -61,7 +71,7 @@ export function SecurityOverview({
   }
 
   return (
-    <div className="content-grid">
+    <div className="content-grid security-workspace-grid">
       <KLineChart
         rows={chart?.rows ?? []}
         quote={overview.quote}
@@ -76,6 +86,11 @@ export function SecurityOverview({
         error={chartError}
         onRefresh={onRefreshMarket}
         refreshing={marketRefreshing}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        isSearching={isSearching}
+        onSearchQueryChange={onSearchQueryChange}
+        onSelectSymbol={onSelectSymbol}
       />
 
       <section className="metric-row">

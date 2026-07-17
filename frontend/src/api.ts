@@ -15,14 +15,26 @@ import type {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const GET_TIMEOUT_MS = 25_000;
 
 async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `Request failed: ${response.status}`);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), GET_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, { signal: controller.signal });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body || `Request failed: ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${GET_TIMEOUT_MS / 1000}s: ${path}`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return (await response.json()) as T;
 }
 
 async function apiPost<T>(path: string): Promise<T> {

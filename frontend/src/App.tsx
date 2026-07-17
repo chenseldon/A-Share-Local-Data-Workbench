@@ -153,30 +153,32 @@ export default function App() {
     setChartLoading(true);
     setOverviewError(null);
     setChartError(null);
-    Promise.all([
-      fetchSecurityOverview(selectedSymbol),
-      fetchSecurityChart(selectedSymbol, chartIndicators),
-      fetchSecurityBoards(selectedSymbol).catch((error: unknown) => {
-        setBoardError(errorMessage(error));
-        return null;
-      })
-    ])
-      .then(([overviewResponse, chartResponse, boardResponse]) => {
+    fetchSecurityOverview(selectedSymbol)
+      .then((overviewResponse) => {
         setOverview(overviewResponse);
-        setChart(chartResponse);
-        setBoards(boardResponse);
-        if (boardResponse) {
-          setBoardError(null);
-        }
       })
       .catch((error: unknown) => {
         setOverview(null);
-        setChart(null);
         setOverviewError(errorMessage(error));
       })
       .finally(() => {
         setOverviewLoading(false);
-        setChartLoading(false);
+      });
+    fetchSecurityChart(selectedSymbol, chartIndicators)
+      .then(setChart)
+      .catch((error: unknown) => {
+        setChart(null);
+        setChartError(errorMessage(error));
+      })
+      .finally(() => setChartLoading(false));
+    fetchSecurityBoards(selectedSymbol)
+      .then((response) => {
+        setBoards(response);
+        setBoardError(null);
+      })
+      .catch((error: unknown) => {
+        setBoards(null);
+        setBoardError(errorMessage(error));
       });
   }, [selectedSymbol, chartIndicatorKey]);
 
@@ -237,29 +239,32 @@ export default function App() {
     setOverviewError(null);
     setChartError(null);
     setBoardError(null);
-    Promise.all([
-      fetchSecurityOverview(symbol),
-      fetchSecurityChart(symbol, chartIndicators),
-      fetchSecurityBoards(symbol).catch((error: unknown) => {
-        setBoardError(errorMessage(error));
-        return null;
-      })
-    ])
-      .then(([overviewResponse, chartResponse, boardResponse]) => {
+    fetchSecurityOverview(symbol)
+      .then((overviewResponse) => {
         setOverview(overviewResponse);
-        setChart(chartResponse);
-        setBoards(boardResponse);
       })
       .catch((error: unknown) => {
-        const message = errorMessage(error);
-        setOverviewError(message);
-        setChartError(message);
+        setOverview(null);
+        setOverviewError(errorMessage(error));
       })
-      .finally(() => {
-        setOverviewLoading(false);
-        setChartLoading(false);
-        void runFullRefresh(symbol);
+      .finally(() => setOverviewLoading(false));
+    fetchSecurityChart(symbol, chartIndicators)
+      .then(setChart)
+      .catch((error: unknown) => {
+        setChart(null);
+        setChartError(errorMessage(error));
+      })
+      .finally(() => setChartLoading(false));
+    fetchSecurityBoards(symbol)
+      .then((response) => {
+        setBoards(response);
+        setBoardError(null);
+      })
+      .catch((error: unknown) => {
+        setBoards(null);
+        setBoardError(errorMessage(error));
       });
+    void runFullRefresh(symbol);
   }
 
   function refreshCurrentView() {
@@ -322,28 +327,6 @@ export default function App() {
     }
   }
 
-  function refreshMarketData() {
-    if (!selectedSymbol) {
-      return;
-    }
-    setMarketRefreshing(true);
-    setOverviewError(null);
-    setChartError(null);
-    refreshSecurity(selectedSymbol)
-      .then(() => {
-        loadSecurity();
-        if (activeView === "module") {
-          loadModule();
-        }
-      })
-      .catch((error: unknown) => {
-        const message = errorMessage(error);
-        setOverviewError(message);
-        setChartError(message);
-      })
-      .finally(() => setMarketRefreshing(false));
-  }
-
   function handleChartIndicatorsChange(nextIndicators: string[]) {
     setChartIndicators(nextIndicators);
   }
@@ -379,15 +362,17 @@ export default function App() {
         onSelectSystem={() => setActiveView("system")}
         sourceHealth={sources}
       />
-      <main className="workspace">
-        <TopBar
-          query={query}
-          searchResults={searchResults}
-          isSearching={isSearching}
-          onQueryChange={setQuery}
-          onSelectSymbol={handleSelectSymbol}
-          onRefresh={refreshCurrentView}
-        />
+      <main className={activeView === "security" ? "workspace workspace-chart-only" : "workspace"}>
+        {activeView !== "security" && (
+          <TopBar
+            query={query}
+            searchResults={searchResults}
+            isSearching={isSearching}
+            onQueryChange={setQuery}
+            onSelectSymbol={handleSelectSymbol}
+            onRefresh={refreshCurrentView}
+          />
+        )}
         <div className="workspace-body">
           {activeView === "security" && (
             <SecurityOverview
@@ -402,8 +387,13 @@ export default function App() {
               boardError={boardError}
               chartIndicators={chartIndicators}
               onChartIndicatorsChange={handleChartIndicatorsChange}
-              onRefreshMarket={refreshMarketData}
+              onRefreshMarket={refreshCurrentView}
               marketRefreshing={marketRefreshing}
+              searchQuery={query}
+              searchResults={searchResults}
+              isSearching={isSearching}
+              onSearchQueryChange={setQuery}
+              onSelectSymbol={handleSelectSymbol}
             />
           )}
           {activeView === "module" && (
@@ -421,7 +411,7 @@ export default function App() {
               chartIndicators={chartIndicators}
               onChartIndicatorsChange={handleChartIndicatorsChange}
               quote={overview?.quote ?? null}
-              onRefreshMarket={refreshMarketData}
+              onRefreshMarket={refreshCurrentView}
               onRefreshModule={refreshActiveModule}
               marketRefreshing={marketRefreshing}
               moduleRefreshing={moduleRefreshing}

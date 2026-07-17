@@ -28,6 +28,8 @@
 - The chart indicator menu exposes 38 single-security `zb.get()` technical indicators plus the built-in volume toggle. `zhishu` remains a basket/index calculation capability and is not shown as a single-stock chart overlay.
 - The search directory is built through `/api/securities/universe/refresh` by scanning supported A-share and ETF prefixes in free-stockdb. The old observed 7,034-symbol directory was incomplete; the refreshed scan targets 7,400+ and the 2026-07-17 local SDK scan found 7,860 candidates across 61 prefixes after adding 160-169, 501/502/506/508/520/526/530/551, 560-563 and 589.
 - Selecting a search candidate or pressing the top refresh button triggers market refresh plus best-effort fundamentals, announcements, reports, signals and chip/liquidity refresh. Slow or failed sources surface in the centered progress/toast flow rather than blocking silently.
+- Security View now keeps symbol search and the full refresh action inside the K-line header, removes the separate topbar for that view, and uses a dark scrollable workspace with the quote/freshness/detail panels restored below the chart.
+- K-line drawing tools are front-end session state only. Cursor mode leaves chart drag/zoom behavior available; drawing modes write SVG overlay objects against main-chart time and price coordinates and do not persist to DuckDB.
 
 ## Secrets
 - No secrets are stored in this project memory.
