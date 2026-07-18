@@ -35,6 +35,8 @@
 - Weekly and monthly K-line indicators are kept enabled. free-stockdb may return indicator dates at period starts while aggregated K-line bars use period-end dates, so the backend merges indicators by exact date first and falls back to sorted positional alignment when row counts match.
 - Security View chart legends show the hovered bar's OHLCV and selected indicator values, and the custom front-end crosshair overlay spans the main chart plus indicator panes.
 - Browser access remains local-only through `http://127.0.0.1:5173/`. CORS includes localhost IPv4 and IPv6, and `start_workbench.ps1` checks `/api/health` when port 8000 is already occupied to distinguish a reusable backend from a stale conflicting process.
+- Empty Security View overview states now expose a `Refresh and reload` recovery action that reuses the full symbol refresh flow instead of requiring a browser reload.
+- The Market module is treated as a dark-theme, current-symbol market workspace with K-line, period switching, quote snapshot, source context, and explicit `Not configured` placeholders for unimplemented order-book/index/ETF capabilities.
 
 ## Secrets
 - No secrets are stored in this project memory.

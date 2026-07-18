@@ -361,6 +361,9 @@ export default function App() {
       .finally(() => setModuleRefreshing(false));
   }
 
+  const marketModuleActive = activeView === "module" && activeModule === "market";
+  const darkWorkspaceActive = activeView === "security" || marketModuleActive;
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -375,8 +378,8 @@ export default function App() {
         onSelectSystem={() => setActiveView("system")}
         sourceHealth={sources}
       />
-      <main className={activeView === "security" ? "workspace workspace-chart-only" : "workspace"}>
-        {activeView !== "security" && (
+      <main className={darkWorkspaceActive ? "workspace workspace-chart-only" : "workspace"}>
+        {!darkWorkspaceActive && (
           <TopBar
             query={query}
             searchResults={searchResults}
@@ -426,11 +429,19 @@ export default function App() {
               boardError={boardError}
               chartIndicators={chartIndicators}
               onChartIndicatorsChange={handleChartIndicatorsChange}
+              chartPeriod={chartPeriod}
+              onChartPeriodChange={handleChartPeriodChange}
+              security={overview?.security ?? null}
               quote={overview?.quote ?? null}
               onRefreshMarket={refreshCurrentView}
               onRefreshModule={refreshActiveModule}
               marketRefreshing={marketRefreshing}
               moduleRefreshing={moduleRefreshing}
+              searchQuery={query}
+              searchResults={searchResults}
+              isSearching={isSearching}
+              onSearchQueryChange={setQuery}
+              onSelectSymbol={handleSelectSymbol}
             />
           )}
           {activeView === "system" && (

@@ -3,7 +3,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type PointerEvent
 } from "react";
 import {
@@ -63,6 +62,7 @@ interface KLineChartProps {
   isSearching?: boolean;
   onSearchQueryChange?: (value: string) => void;
   onSelectSymbol?: (symbol: string) => void;
+  mode?: "security" | "market";
 }
 
 type IndicatorPlacement = "overlay" | "pane" | "built_in";
@@ -98,6 +98,13 @@ interface CrosshairState {
   row: ChartBar;
   valueLabel: string;
   timeLabel: string;
+}
+
+interface AxisValueLabel {
+  id: string;
+  value: string;
+  color: string;
+  y: number;
 }
 
 const indicatorOptions: IndicatorOption[] = [
@@ -161,18 +168,34 @@ const toolActions: Array<{ action: DrawingAction; title: string; icon: typeof Mo
   { action: "clear", title: "Clear all drawings", icon: Trash2 }
 ];
 
-const periodOptions: Array<{ value: ChartPeriod; label: string }> = [
-  { value: "1m", label: "1分" },
-  { value: "5m", label: "5分" },
-  { value: "15m", label: "15分" },
-  { value: "30m", label: "30分" },
-  { value: "60m", label: "1小时" },
-  { value: "1d", label: "日" },
-  { value: "1w", label: "周" },
-  { value: "1M", label: "月" }
+const periodOptions: Array<{ value: ChartPeriod; label: string; legendLabel: string }> = [
+  { value: "1m", label: "1分", legendLabel: "1 MIN" },
+  { value: "5m", label: "5分", legendLabel: "5 MIN" },
+  { value: "15m", label: "15分", legendLabel: "15 MIN" },
+  { value: "30m", label: "30分", legendLabel: "30 MIN" },
+  { value: "60m", label: "1小时", legendLabel: "1 HOUR" },
+  { value: "1d", label: "日", legendLabel: "1 DAY" },
+  { value: "1w", label: "周", legendLabel: "1 WEEK" },
+  { value: "1M", label: "月", legendLabel: "1 MONTH" }
 ];
 
 const lineColors = ["#f59e0b", "#38bdf8", "#c084fc", "#22c55e", "#f97316", "#e879f9", "#60a5fa"];
+const fieldColors: Record<string, string> = {
+  ma5: "#f59e0b",
+  ma10: "#38bdf8",
+  ma20: "#a78bfa",
+  dif: "#f59e0b",
+  dea: "#38bdf8",
+  macd: "#ef4444",
+  rsi: "#38bdf8",
+  rsi6: "#38bdf8",
+  rsi12: "#a78bfa",
+  rsi24: "#f59e0b",
+  k: "#f59e0b",
+  d: "#38bdf8",
+  j: "#e879f9",
+  volume: "#60a5fa"
+};
 const mainChartBaseHeight = 690;
 
 function sourceLabel(rows: ChartBar[], quote: MarketQuote | null): string {
@@ -232,6 +255,29 @@ function formatVolume(value: number | null | undefined): string {
   return value.toLocaleString();
 }
 
+function fieldColor(field: string, fallback: string, value?: number | null): string {
+  if (field === "macd" && typeof value === "number") {
+    return value >= 0 ? "#ef4444" : "#22c55e";
+  }
+  return fieldColors[field] ?? fallback;
+}
+
+function fieldLabel(field: string): string {
+  if (field.startsWith("ma") || field.startsWith("rsi")) {
+    return field.toUpperCase();
+  }
+  if (field === "dif") {
+    return "DIF";
+  }
+  if (field === "dea") {
+    return "DEA";
+  }
+  if (field === "macd") {
+    return "MACD";
+  }
+  return field;
+}
+
 function rowChangePercent(row: ChartBar): number | null {
   if (row.open === null || row.open === undefined || row.open === 0 || row.close === null || row.close === undefined) {
     return null;
@@ -260,7 +306,8 @@ export function KLineChart(props: KLineChartProps) {
     searchResults = [],
     isSearching = false,
     onSearchQueryChange,
-    onSelectSymbol
+    onSelectSymbol,
+    mode = "security"
   } = props;
   const mainContainerRef = useRef<HTMLDivElement | null>(null);
   const chartStackRef = useRef<HTMLDivElement | null>(null);
@@ -268,6 +315,9 @@ export function KLineChart(props: KLineChartProps) {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const mainChartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const mainSeriesRefs = useRef<Array<{ id: string; field: string; color: string; series: ISeriesApi<"Line"> }>>([]);
+  const paneSeriesRefs = useRef<Record<string, Array<{ id: string; field: string; color: string; series: ISeriesApi<"Line"> | ISeriesApi<"Histogram"> }>>>({});
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -277,6 +327,7 @@ export function KLineChart(props: KLineChartProps) {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [draftDrawing, setDraftDrawing] = useState<Drawing | null>(null);
   const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
+  const [axisValueLabels, setAxisValueLabels] = useState<AxisValueLabel[]>([]);
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
   const [, setOverlayVersion] = useState(0);
   const chartRows = useMemo(
@@ -302,12 +353,19 @@ export function KLineChart(props: KLineChartProps) {
   const mainChartHeight = Math.max(360, mainChartBaseHeight - paneIndicators.length * paneHeight);
   const canSearch = hasSearchProps(props);
   const primarySector = boards?.sw_l1[0] ?? security?.sector ?? "No sector";
-  const conceptPreview = boards?.concepts.slice(0, 3) ?? [];
+  const boardTags = [security?.exchange, security?.asset_type, primarySector, ...(boards?.concepts ?? [])].filter(
+    (tag): tag is string => Boolean(tag)
+  );
+  const visibleBoardTags = boardTags.slice(0, 3);
+  const hiddenBoardTagCount = Math.max(0, boardTags.length - visibleBoardTags.length);
+  const boardTitle = boardTags.join(" / ");
   const visibleSearchResults = searchResults.slice(0, 5);
   const legendRow = crosshair?.row ?? chartRows[chartRows.length - 1] ?? null;
   const legendChange = legendRow ? rowChangePercent(legendRow) : null;
-  const indicatorLegendRows = selectedIndicators
-    .filter((indicator) => indicator.id !== "volume")
+  const displaySymbol = security?.symbol ?? quote?.symbol ?? "No symbol selected";
+  const displayName = security?.name ?? sourceLabel(rows, quote);
+  const mainLegendRows = selectedIndicators
+    .filter((indicator) => indicator.placement === "overlay")
     .map((indicator) => ({
       indicator,
       fields: firstAvailableFields(chartRows, indicator.fields)
@@ -375,6 +433,74 @@ export function KLineChart(props: KLineChartProps) {
   function selectSearchResult(symbol: string) {
     setSearchOpen(false);
     onSelectSymbol?.(symbol);
+  }
+
+  function updateAxisValueLabels(row: ChartBar | null) {
+    const stack = chartStackRef.current;
+    const mainContainer = mainContainerRef.current;
+    const candleSeries = candleSeriesRef.current;
+    if (!row || !stack || !mainContainer || !candleSeries) {
+      setAxisValueLabels([]);
+      return;
+    }
+
+    const stackTop = stack.getBoundingClientRect().top;
+    const labels: AxisValueLabel[] = [];
+    const mainTop = mainContainer.getBoundingClientRect().top - stackTop;
+    const closeY = row.close === null || row.close === undefined ? null : candleSeries.priceToCoordinate(row.close);
+    if (closeY !== null) {
+      labels.push({
+        id: "close",
+        value: formatLegendNumber(row.close),
+        color: (row.close ?? 0) >= (row.open ?? row.close ?? 0) ? "#ef4444" : "#22c55e",
+        y: mainTop + closeY
+      });
+    }
+
+    mainSeriesRefs.current.forEach((item) => {
+      const value = numericValue(row, item.field);
+      const y = value === null ? null : item.series.priceToCoordinate(value);
+      if (value !== null && y !== null) {
+        labels.push({
+          id: item.id,
+          value: formatLegendNumber(value, 2),
+          color: fieldColor(item.field, item.color, value),
+          y: mainTop + y
+        });
+      }
+    });
+
+    const volumeValue = row.volume;
+    if (volumeValue !== null && volumeValue !== undefined && Number.isFinite(volumeValue)) {
+      labels.push({
+        id: "volume",
+        value: formatVolume(volumeValue),
+        color: fieldColors.volume,
+        y: mainTop + mainContainer.getBoundingClientRect().height - 18
+      });
+    }
+
+    paneIndicators.forEach((indicator) => {
+      const pane = paneContainerRefs.current[indicator.id];
+      if (!pane) {
+        return;
+      }
+      const paneTop = pane.getBoundingClientRect().top - stackTop;
+      (paneSeriesRefs.current[indicator.id] ?? []).forEach((item) => {
+        const value = numericValue(row, item.field);
+        const y = value === null ? null : item.series.priceToCoordinate(value);
+        if (value !== null && y !== null) {
+          labels.push({
+            id: item.id,
+            value: formatLegendNumber(value, 2),
+            color: fieldColor(item.field, item.color, value),
+            y: paneTop + y
+          });
+        }
+      });
+    });
+
+    setAxisValueLabels(labels);
   }
 
   function handleToolClick(tool: DrawingTool) {
@@ -486,10 +612,12 @@ export function KLineChart(props: KLineChartProps) {
       valueLabel,
       timeLabel: row.trade_date
     });
+    updateAxisValueLabels(row);
   }
 
   function clearCrosshair() {
     setCrosshair(null);
+    updateAxisValueLabels(chartRows[chartRows.length - 1] ?? null);
   }
 
   useEffect(() => {
@@ -524,6 +652,9 @@ export function KLineChart(props: KLineChartProps) {
 
     const allCharts: IChartApi[] = [];
     const unsubscribeHandlers: Array<{ chart: IChartApi; handler: LogicalRangeChangeEventHandler }> = [];
+    mainSeriesRefs.current = [];
+    paneSeriesRefs.current = {};
+    volumeSeriesRef.current = null;
     let syncing = false;
     const syncRange = (source: IChartApi, range: LogicalRange | null) => {
       if (syncing || !range) {
@@ -564,7 +695,9 @@ export function KLineChart(props: KLineChartProps) {
       borderUpColor: "#ef4444",
       borderDownColor: "#22c55e",
       wickUpColor: "#ef4444",
-      wickDownColor: "#22c55e"
+      wickDownColor: "#22c55e",
+      priceLineVisible: false,
+      lastValueVisible: false
     });
     candleSeriesRef.current = candles;
     candles.setData(
@@ -581,8 +714,11 @@ export function KLineChart(props: KLineChartProps) {
       const volume = mainChart.addSeries(HistogramSeries, {
         priceFormat: { type: "volume" },
         priceScaleId: "",
-        color: "rgba(96, 165, 250, 0.35)"
+        color: "rgba(96, 165, 250, 0.35)",
+        priceLineVisible: false,
+        lastValueVisible: false
       });
+      volumeSeriesRef.current = volume;
       volume.priceScale().applyOptions({
         scaleMargins: { top: 0.84, bottom: 0 }
       });
@@ -599,9 +735,16 @@ export function KLineChart(props: KLineChartProps) {
       const fields = firstAvailableFields(chartRows, indicator.fields);
       fields.forEach((field, fieldIndex) => {
         const series = mainChart.addSeries(LineSeries, {
-          color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length],
+          color: fieldColor(field, lineColors[(indicatorIndex + fieldIndex) % lineColors.length]),
           lineWidth: 1,
-          priceLineVisible: false
+          priceLineVisible: false,
+          lastValueVisible: false
+        });
+        mainSeriesRefs.current.push({
+          id: `${indicator.id}-${field}`,
+          field,
+          color: fieldColor(field, lineColors[(indicatorIndex + fieldIndex) % lineColors.length]),
+          series
         });
         series.setData(lineData(field));
       });
@@ -638,8 +781,18 @@ export function KLineChart(props: KLineChartProps) {
         if (indicator.id === "macd" && field === "macd") {
           const series = paneChart.addSeries(HistogramSeries, {
             priceLineVisible: false,
+            lastValueVisible: false,
             color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length]
           });
+          paneSeriesRefs.current[indicator.id] = [
+            ...(paneSeriesRefs.current[indicator.id] ?? []),
+            {
+              id: `${indicator.id}-${field}`,
+              field,
+              color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length],
+              series
+            }
+          ];
           series.setData(
             chartRows
                 .filter((row) => numericValue(row, field) !== null)
@@ -652,10 +805,20 @@ export function KLineChart(props: KLineChartProps) {
           return;
         }
         const series = paneChart.addSeries(LineSeries, {
-          color: lineColors[(indicatorIndex + fieldIndex) % lineColors.length],
+          color: fieldColor(field, lineColors[(indicatorIndex + fieldIndex) % lineColors.length]),
           lineWidth: 1,
-          priceLineVisible: false
+          priceLineVisible: false,
+          lastValueVisible: false
         });
+        paneSeriesRefs.current[indicator.id] = [
+          ...(paneSeriesRefs.current[indicator.id] ?? []),
+          {
+            id: `${indicator.id}-${field}`,
+            field,
+            color: fieldColor(field, lineColors[(indicatorIndex + fieldIndex) % lineColors.length]),
+            series
+          }
+        ];
         series.setData(lineData(field));
       });
     });
@@ -670,12 +833,16 @@ export function KLineChart(props: KLineChartProps) {
     if (currentRange) {
       allCharts.slice(1).forEach((chart) => chart.timeScale().setVisibleLogicalRange(currentRange));
     }
+    window.setTimeout(() => updateAxisValueLabels(chartRows[chartRows.length - 1] ?? null), 0);
 
     return () => {
       unsubscribeHandlers.forEach(({ chart, handler }) => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler));
       allCharts.forEach((chart) => chart.remove());
       mainChartRef.current = null;
       candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      mainSeriesRefs.current = [];
+      paneSeriesRefs.current = {};
     };
   }, [chartRows, enabledIndicators, mainChartHeight, paneHeight]);
 
@@ -780,7 +947,7 @@ export function KLineChart(props: KLineChartProps) {
   }
 
   return (
-    <section className="panel chart-panel">
+    <section className={`panel chart-panel chart-panel-${mode}`}>
       <div className="section-heading chart-heading">
         <div className="chart-title-block">
           {searchOpen && canSearch ? (
@@ -817,18 +984,16 @@ export function KLineChart(props: KLineChartProps) {
             </div>
           ) : (
             <button className="chart-security-title-button" type="button" onClick={beginSearch} disabled={!canSearch}>
-              <span>{security?.symbol ?? "No symbol selected"}</span>
-              <strong>{security?.name ?? sourceLabel(rows, quote)}</strong>
+              <span>{displaySymbol}</span>
+              <strong>{displayName}</strong>
             </button>
           )}
           {security && (
-            <div className="chart-security-meta">
-              <span>{security.exchange}</span>
-              <span>{security.asset_type}</span>
-              <span>{primarySector}</span>
-              {conceptPreview.map((concept) => (
-                <span key={concept}>{concept}</span>
+            <div className="chart-security-meta" title={boardTitle}>
+              {visibleBoardTags.map((tag, index) => (
+                <span key={`${tag}-${index}`}>{tag}</span>
               ))}
+              {hiddenBoardTagCount > 0 && <span>+{hiddenBoardTagCount}</span>}
               {boardError && <span>Board mapping failed</span>}
             </div>
           )}
@@ -927,44 +1092,43 @@ export function KLineChart(props: KLineChartProps) {
             >
               {legendCollapsed ? <Plus aria-hidden="true" size={14} /> : <ChevronUp aria-hidden="true" size={14} />}
             </button>
-            {!legendCollapsed && (
-              <div className="legend-content">
-                <div className="legend-quote-row">
-                  <strong>{security?.symbol ?? "K-Line"}</strong>
-                  {security?.name && <span>{security.name}</span>}
-                  <span>{periodOptions.find((option) => option.value === period)?.label ?? period}</span>
-                  {legendRow && (
-                    <>
-                      <span>开 {formatLegendNumber(legendRow.open)}</span>
-                      <span>高 {formatLegendNumber(legendRow.high)}</span>
-                      <span>低 {formatLegendNumber(legendRow.low)}</span>
-                      <span>收 {formatLegendNumber(legendRow.close)}</span>
-                      <span className={legendChange !== null && legendChange >= 0 ? "legend-up" : "legend-down"}>
-                        {legendChange === null ? "涨跌 NA" : `${legendChange >= 0 ? "+" : ""}${legendChange.toFixed(2)}%`}
-                      </span>
-                      <span>成交量 {formatVolume(legendRow.volume)}</span>
-                    </>
-                  )}
-                </div>
-                {indicatorLegendRows.length > 0 && (
-                  <div className="legend-indicator-grid">
-                    {indicatorLegendRows.map(({ indicator, fields }) => (
-                      <div className="legend-indicator-row" key={indicator.id}>
-                        <span className="legend-item" style={{ "--legend-color": indicator.color } as CSSProperties}>
-                          {indicator.label}
-                        </span>
-                        {fields.map((field) => (
-                          <small key={field}>
-                            {field} {legendRow ? formatLegendNumber(numericValue(legendRow, field), 3) : "NA"}
-                          </small>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
+            <div className="legend-content">
+              <div className="legend-quote-row">
+                <strong>{security?.symbol ?? "K-Line"}</strong>
+                {security?.name && <span>{security.name}</span>}
+                <span>{periodOptions.find((option) => option.value === period)?.legendLabel ?? period.toUpperCase()}</span>
+                {legendRow && (
+                  <>
+                    <span>O {formatLegendNumber(legendRow.open)}</span>
+                    <span>H {formatLegendNumber(legendRow.high)}</span>
+                    <span>L {formatLegendNumber(legendRow.low)}</span>
+                    <span>C {formatLegendNumber(legendRow.close)}</span>
+                    <span className={legendChange !== null && legendChange >= 0 ? "legend-up" : "legend-down"}>
+                      {legendChange === null ? "CHG NA" : `${legendChange >= 0 ? "+" : ""}${legendChange.toFixed(2)}%`}
+                    </span>
+                    <span>VOL {formatVolume(legendRow.volume)}</span>
+                  </>
                 )}
-                {indicatorStatus === "failed" && <span className="chart-warning">{indicatorError ?? "Indicator calculation failed"}</span>}
               </div>
-            )}
+              {!legendCollapsed && mainLegendRows.length > 0 && (
+                <div className="legend-indicator-grid">
+                  {mainLegendRows.map(({ indicator, fields }) => (
+                    <div className="legend-indicator-row" key={indicator.id}>
+                      <span>{indicator.label}</span>
+                      {fields.map((field, fieldIndex) => {
+                        const value = legendRow ? numericValue(legendRow, field) : null;
+                        return (
+                          <small key={field} style={{ color: fieldColor(field, lineColors[fieldIndex % lineColors.length], value) }}>
+                            {fieldLabel(field)} {formatLegendNumber(value, 3)}
+                          </small>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {indicatorStatus === "failed" && <span className="chart-warning">{indicatorError ?? "Indicator calculation failed"}</span>}
+            </div>
           </div>
           {loading && <div className="chart-empty">Loading free-stockdb K-line...</div>}
           {error && <div className="chart-empty chart-error">{error}</div>}
@@ -988,6 +1152,15 @@ export function KLineChart(props: KLineChartProps) {
                   <span className="chart-crosshair-time" style={{ left: crosshair.x }}>
                     {crosshair.timeLabel}
                   </span>
+                </div>
+              )}
+              {axisValueLabels.length > 0 && (
+                <div className="chart-axis-value-labels" aria-hidden="true">
+                  {axisValueLabels.map((label) => (
+                    <span key={label.id} style={{ top: label.y, background: label.color }}>
+                      {label.value}
+                    </span>
+                  ))}
                 </div>
               )}
               <div className="main-chart-wrap" style={{ height: mainChartHeight }}>
@@ -1015,7 +1188,18 @@ export function KLineChart(props: KLineChartProps) {
                       <div className="indicator-pane" key={indicator.id} style={{ height: paneHeight }}>
                         <div className="indicator-pane-title">
                           <span>{indicator.label}</span>
-                          <small>{fields.length ? fields.join(" / ") : "No values returned"}</small>
+                          {fields.length ? (
+                            fields.map((field, fieldIndex) => {
+                              const value = legendRow ? numericValue(legendRow, field) : null;
+                              return (
+                                <small key={field} style={{ color: fieldColor(field, lineColors[fieldIndex % lineColors.length], value) }}>
+                                  {fieldLabel(field)} {formatLegendNumber(value, 3)}
+                                </small>
+                              );
+                            })
+                          ) : (
+                            <small>No values returned</small>
+                          )}
                         </div>
                         <div
                           className="indicator-pane-canvas"

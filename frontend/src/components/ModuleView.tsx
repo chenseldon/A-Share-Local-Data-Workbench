@@ -1,5 +1,6 @@
 import { BarChart3, FileText, ListChecks, RadioTower, RefreshCw } from "lucide-react";
-import type { BoardMappingResponse, ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition } from "../types";
+import type { ChartPeriod } from "../api";
+import type { BoardMappingResponse, ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition, Security } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
@@ -18,11 +19,19 @@ interface ModuleViewProps {
   boardError: string | null;
   chartIndicators: string[];
   onChartIndicatorsChange: (indicators: string[]) => void;
+  chartPeriod: ChartPeriod;
+  onChartPeriodChange: (period: ChartPeriod) => void;
+  security: Security | null;
   quote: MarketQuote | null;
   onRefreshMarket: () => void;
   onRefreshModule: () => void;
   marketRefreshing: boolean;
   moduleRefreshing: boolean;
+  searchQuery: string;
+  searchResults: Security[];
+  isSearching: boolean;
+  onSearchQueryChange: (value: string) => void;
+  onSelectSymbol: (symbol: string) => void;
 }
 
 function moduleEmptyLabel(module: ModuleDefinition, status: string): string {
@@ -45,14 +54,139 @@ export function ModuleView({
   boardError,
   chartIndicators,
   onChartIndicatorsChange,
+  chartPeriod,
+  onChartPeriodChange,
+  security,
   quote,
   onRefreshMarket,
   onRefreshModule,
   marketRefreshing,
-  moduleRefreshing
+  moduleRefreshing,
+  searchQuery,
+  searchResults,
+  isSearching,
+  onSearchQueryChange,
+  onSelectSymbol
 }: ModuleViewProps) {
   if (!module) {
     return <EmptyState title="Unknown module" detail="Select one of the ten configured navigation modules." />;
+  }
+
+  if (module.id === "market") {
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">Market Layer</span>
+              <h1>Search a symbol to inspect market data</h1>
+              <p>Market module reads local free-stockdb K-line data, quote fields and source status after a symbol is selected.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol or Chinese name"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const quoteItems = quote
+      ? [
+          { label: "Last price", value: quote.last_price },
+          { label: "Open", value: quote.open },
+          { label: "High", value: quote.high },
+          { label: "Low", value: quote.low },
+          { label: "Volume", value: quote.volume?.toLocaleString() ?? "NA" },
+          { label: "Amount", value: quote.amount?.toLocaleString() ?? "NA" },
+          { label: "PE TTM", value: quote.pe_ttm ?? quote.pe_static ?? "NA" },
+          { label: "PB", value: quote.pb ?? "NA" },
+          { label: "Source", value: quote.source },
+          { label: "Fetched at", value: quote.fetched_at }
+        ]
+      : [];
+
+    return (
+      <div className="content-grid security-workspace-grid module-market-grid">
+        <KLineChart
+          rows={chart?.rows ?? []}
+          quote={quote}
+          security={security}
+          boards={boards}
+          boardError={boardError}
+          enabledIndicators={chartIndicators}
+          onIndicatorsChange={onChartIndicatorsChange}
+          period={chartPeriod}
+          onPeriodChange={onChartPeriodChange}
+          indicatorStatus={chart?.indicator_status}
+          indicatorError={chart?.indicator_error ?? null}
+          loading={chartLoading}
+          error={chartError}
+          onRefresh={onRefreshMarket}
+          refreshing={marketRefreshing}
+          searchQuery={searchQuery}
+          searchResults={searchResults}
+          isSearching={isSearching}
+          onSearchQueryChange={onSearchQueryChange}
+          onSelectSymbol={onSelectSymbol}
+          mode="market"
+        />
+
+        {quoteItems.length > 0 && (
+          <section className="panel market-snapshot-panel">
+            <div className="section-heading">
+              <div>
+                <h2>Market Quote Snapshot</h2>
+                <p>Latest cached quote fields for the current symbol.</p>
+              </div>
+            </div>
+            <div className="snapshot-grid module-quote-grid">
+              {quoteItems.map((item) => (
+                <div key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value === null || item.value === undefined || item.value === "" ? "NA" : item.value}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="panel module-market-strip">
+          <div className="section-heading">
+            <div>
+              <h2>Market Layer Coverage</h2>
+              <p>Unavailable upstream areas are shown explicitly instead of rendered as data.</p>
+            </div>
+            <BarChart3 aria-hidden="true" size={20} />
+          </div>
+          <div className="market-placeholders">
+            <span>K-line: free-stockdb</span>
+            <span>Quote: public snapshot cache</span>
+            <span>Five-level order book: Not configured</span>
+            <span>Index/ETF entrance: Not configured</span>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -114,40 +248,6 @@ export function ModuleView({
           </div>
         </div>
       </section>
-
-      {module.id === "market" && (
-        <KLineChart
-          rows={chart?.rows ?? []}
-          quote={quote}
-          boards={boards}
-          boardError={boardError}
-          enabledIndicators={chartIndicators}
-          onIndicatorsChange={onChartIndicatorsChange}
-          indicatorStatus={chart?.indicator_status}
-          indicatorError={chart?.indicator_error ?? null}
-          loading={chartLoading}
-          error={chartError}
-          onRefresh={onRefreshMarket}
-          refreshing={marketRefreshing}
-        />
-      )}
-
-      {module.id === "market" && (
-        <section className="panel module-market-strip">
-          <div className="section-heading">
-            <div>
-              <h2>Market Workspace</h2>
-              <p>Current V1.1 scope: cached public-source quote, daily K-line, MA overlays and local data lineage.</p>
-            </div>
-            <BarChart3 aria-hidden="true" size={20} />
-          </div>
-          <div className="market-placeholders">
-            <span>Five-level order book: placeholder</span>
-            <span>PE/PB/market cap: fundamentals table</span>
-            <span>Index/ETF context: planned connector</span>
-          </div>
-        </section>
-      )}
 
       {loading && <div className="panel loading-panel">Loading local module rows...</div>}
       {error && <EmptyState title="Module request failed" detail={error} />}

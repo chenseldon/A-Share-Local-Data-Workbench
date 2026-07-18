@@ -1,4 +1,5 @@
 import type { ChartPeriod } from "../api";
+import { RefreshCw } from "lucide-react";
 import type { BoardMappingResponse, ChartResponse, DataRow, Security, SecurityOverview as SecurityOverviewType } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
@@ -28,14 +29,40 @@ interface SecurityOverviewProps {
   apiHealthError: string | null;
 }
 
-function formatSnapshotValue(value: number | string | null | undefined, suffix = ""): string {
+function formatSnapshotValue(value: number | string | null | undefined, suffix = "", maximumFractionDigits = 2): string {
   if (value === null || value === undefined || value === "") {
     return "NA";
   }
   if (typeof value === "number") {
-    return `${Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
+    return `${Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits })}${suffix}`;
   }
   return `${value}${suffix}`;
+}
+
+function formatSnapshotPercent(value: number | null | undefined): string {
+  return formatSnapshotValue(value, "%", 2);
+}
+
+function formatSnapshotWan(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "NA";
+  }
+  return `${(value / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}万`;
+}
+
+function formatSnapshotYi(value: number | null | undefined, inputUnit: "yuan" | "wan" | "yi" = "yi"): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "NA";
+  }
+  const divisor = inputUnit === "yuan" ? 100_000_000 : inputUnit === "wan" ? 10_000 : 1;
+  return `${(value / divisor).toLocaleString(undefined, { maximumFractionDigits: 2 })}亿`;
+}
+
+function normalizedExternalUrl(url: string): string {
+  if (url.includes("cninfo.com.cn") && url.includes("annoId=")) {
+    return url.replace("annoId=", "announcementId=");
+  }
+  return url;
 }
 
 function renderLinkedTitle(value: unknown, column: { key: string }, row: DataRow) {
@@ -49,7 +76,7 @@ function renderLinkedTitle(value: unknown, column: { key: string }, row: DataRow
     return String(value);
   }
   const title = value === null || value === undefined ? "-" : String(value);
-  const url = typeof row.url === "string" && row.url ? row.url : null;
+  const url = typeof row.url === "string" && row.url ? normalizedExternalUrl(row.url) : null;
   if (!url) {
     return title;
   }
@@ -135,6 +162,12 @@ export function SecurityOverview({
       <EmptyState
         title={`No local overview for ${selectedSymbol}`}
         detail="The backend is reachable, but this symbol has not been collected or seeded in the local database."
+        action={
+          <button className="secondary-button" type="button" onClick={onRefreshMarket} disabled={marketRefreshing}>
+            <RefreshCw aria-hidden="true" size={15} />
+            {marketRefreshing ? "Refreshing" : "Refresh and reload"}
+          </button>
+        }
       />
     );
   }
@@ -142,6 +175,25 @@ export function SecurityOverview({
   if (!overview) {
     return <EmptyState title="No symbol selected" detail="Search a local security to inspect cross-module context." />;
   }
+
+  const snapshotItems = overview.quote
+    ? [
+        { label: "今开", value: formatSnapshotValue(overview.quote.open) },
+        { label: "最高", value: formatSnapshotValue(overview.quote.high) },
+        { label: "涨停", value: formatSnapshotValue(overview.quote.limit_up) },
+        { label: "换手", value: formatSnapshotPercent(overview.quote.turnover_pct) },
+        { label: "成交量", value: formatSnapshotWan(overview.quote.volume) },
+        { label: "市盈", value: formatSnapshotValue(overview.quote.pe_ttm ?? overview.quote.pe_static) },
+        { label: "总市值", value: formatSnapshotYi(overview.quote.total_market_cap) },
+        { label: "昨收", value: formatSnapshotValue(overview.quote.previous_close) },
+        { label: "最低", value: formatSnapshotValue(overview.quote.low) },
+        { label: "跌停", value: formatSnapshotValue(overview.quote.limit_down) },
+        { label: "量比", value: formatSnapshotValue(overview.quote.volume_ratio) },
+        { label: "成交额", value: formatSnapshotYi(overview.quote.amount, "wan") },
+        { label: "市净", value: formatSnapshotValue(overview.quote.pb) },
+        { label: "流通市值", value: formatSnapshotYi(overview.quote.float_market_cap) }
+      ]
+    : [];
 
   return (
     <div className="content-grid security-workspace-grid">
@@ -166,6 +218,7 @@ export function SecurityOverview({
         isSearching={isSearching}
         onSearchQueryChange={onSearchQueryChange}
         onSelectSymbol={onSelectSymbol}
+        mode="security"
       />
 
       {overview.quote && (
@@ -177,16 +230,12 @@ export function SecurityOverview({
             </div>
           </div>
           <div className="snapshot-grid">
-            <div><span>换手率</span><strong>{formatSnapshotValue(overview.quote.turnover_pct, "%")}</strong></div>
-            <div><span>涨幅%</span><strong>{formatSnapshotValue(overview.quote.change_pct, "%")}</strong></div>
-            <div><span>振幅%</span><strong>{formatSnapshotValue(overview.quote.amplitude_pct, "%")}</strong></div>
-            <div><span>量比</span><strong>{formatSnapshotValue(overview.quote.volume_ratio)}</strong></div>
-            <div><span>总股本</span><strong>NA</strong></div>
-            <div><span>流通股本</span><strong>NA</strong></div>
-            <div><span>总市值</span><strong>{formatSnapshotValue(overview.quote.total_market_cap)}</strong></div>
-            <div><span>流通市值</span><strong>{formatSnapshotValue(overview.quote.float_market_cap)}</strong></div>
-            <div><span>市盈率</span><strong>{formatSnapshotValue(overview.quote.pe_ttm ?? overview.quote.pe_static)}</strong></div>
-            <div><span>市净率</span><strong>{formatSnapshotValue(overview.quote.pb)}</strong></div>
+            {snapshotItems.map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </div>
+            ))}
           </div>
         </section>
       )}
