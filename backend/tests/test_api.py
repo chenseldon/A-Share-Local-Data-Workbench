@@ -311,7 +311,9 @@ def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None
         assert market_payload["limits"]["limit_up"] == 1661.0
         assert market_payload["liquidity"]["turnover_pct"] == 1.2
         assert market_payload["order_book"]["status"] == "optional_dependency_missing"
-        assert market_payload["index_etf"]["status"] == "not_configured"
+        assert market_payload["order_book"]["note"] == "mootdx optional dependency is not installed/enabled; five-level order book is unavailable."
+        assert market_payload["index_etf"]["status"] == "prepared"
+        assert market_payload["index_etf"]["entries"]
 
 
 def test_chart_indicators_are_merged_on_demand(tmp_path: Path, monkeypatch) -> None:

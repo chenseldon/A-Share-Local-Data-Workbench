@@ -722,10 +722,10 @@ class DataRepository:
                 "status": "optional_dependency_missing",
                 "source": "mootdx",
                 "rows": [],
-                "note": "a-stock-data maps five-level order book to mootdx; this optional dependency is not enabled in the workbench runtime.",
+                "note": "mootdx optional dependency is not installed/enabled; five-level order book is unavailable.",
             },
             "index_etf": {
-                "status": "not_configured",
+                "status": "prepared",
                 "source": "Tencent Finance",
                 "entries": [
                     {"label": "SSE Composite", "symbol": "000001.SH"},
@@ -734,7 +734,7 @@ class DataRepository:
                     {"label": "SSE 50 ETF", "symbol": "510050.SH"},
                     {"label": "CSI 300 ETF", "symbol": "510300.SH"},
                 ],
-                "note": "Tencent supports index and ETF quote codes; module-level browsing is not configured yet.",
+                "note": "Quick entries reuse the existing symbol workflow; full index/ETF browsing is not implemented yet.",
             },
             "source_status": source_status,
         }

@@ -40,6 +40,7 @@
 - K-line chart requests now default to the latest 2,000 bars for every supported free-stockdb native period. The backend chart API accepts `limit=2000`; the UI does not currently expose full-history loading or lazy backfill.
 - K-line charts load 2,000 rows but initialize the visible logical range to the latest 500 rows when enough data is available. Indicator toggles preserve the current visible range for the same symbol/period dataset.
 - The Market module now returns a structured `market` payload from `/api/modules/market/data`, with quote snapshot, valuation, price-limit, liquidity, order-book status, index/ETF status, and market source status. K-line data still comes from free-stockdb; mootdx order book remains an optional capability unless the dependency/runtime is enabled.
+- Market module numeric panels show source and fetch time in section headers instead of value cards. Index/ETF support is currently a quick-entry workflow that switches symbols through the existing loader, not a full index/ETF browser. mootdx is not installed by default, so five-level order book remains `optional_dependency_missing`.
 
 ## Secrets
 - No secrets are stored in this project memory.

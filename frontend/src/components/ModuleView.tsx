@@ -69,8 +69,23 @@ function formatYi(value: unknown): string {
   return `${value.toLocaleString()}亿`;
 }
 
-function formatSourceTime(source?: string | null, fetchedAt?: string | null): string {
-  return [source, fetchedAt].filter(Boolean).join(" · ") || "NA";
+function formatPanelTime(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "NA";
+  }
+  const raw = String(value);
+  return raw.includes("T") ? raw.replace("T", " ").slice(0, 19) : raw.slice(0, 19);
+}
+
+function sourceStatusDetail(source: { status: string; last_success_at?: string | null; last_failure_at?: string | null }): string | null {
+  const status = source.status.toLowerCase();
+  if (["fresh", "ok", "success", "configured"].includes(status)) {
+    return source.last_success_at ? `success: ${formatPanelTime(source.last_success_at)}` : null;
+  }
+  if (status === "failed") {
+    return source.last_failure_at ? `failure: ${formatPanelTime(source.last_failure_at)}` : null;
+  }
+  return null;
 }
 
 export function ModuleView({
@@ -154,10 +169,7 @@ export function ModuleView({
           { label: "Open", value: quoteSnapshot.open },
           { label: "High", value: quoteSnapshot.high },
           { label: "Low", value: quoteSnapshot.low },
-          { label: "Previous close", value: quoteSnapshot.previous_close },
-          { label: "Price time", value: quoteSnapshot.price_time },
-          { label: "Source", value: quoteSnapshot.source },
-          { label: "Fetched at", value: quoteSnapshot.fetched_at }
+          { label: "Previous close", value: quoteSnapshot.previous_close }
         ]
       : [];
 
@@ -166,24 +178,21 @@ export function ModuleView({
       { label: "PE static", value: sectionValue(valuation, "pe_static") },
       { label: "PB", value: sectionValue(valuation, "pb") },
       { label: "Total market cap", value: formatYi(sectionValue(valuation, "total_market_cap")) },
-      { label: "Float market cap", value: formatYi(sectionValue(valuation, "float_market_cap")) },
-      { label: "Source", value: formatSourceTime(valuation?.source, valuation?.fetched_at) }
+      { label: "Float market cap", value: formatYi(sectionValue(valuation, "float_market_cap")) }
     ];
     const limitItems = [
       { label: "Limit up", value: sectionValue(limits, "limit_up") },
       { label: "Limit down", value: sectionValue(limits, "limit_down") },
       { label: "Change amount", value: sectionValue(limits, "change_amt") },
       { label: "Change %", value: formatPercent(sectionValue(limits, "change_pct")) },
-      { label: "Amplitude %", value: formatPercent(sectionValue(limits, "amplitude_pct")) },
-      { label: "Source", value: formatSourceTime(limits?.source, limits?.fetched_at) }
+      { label: "Amplitude %", value: formatPercent(sectionValue(limits, "amplitude_pct")) }
     ];
     const liquidityItems = [
       { label: "Turnover %", value: formatPercent(sectionValue(liquidity, "turnover_pct")) },
       { label: "Volume ratio", value: sectionValue(liquidity, "volume_ratio") },
       { label: "Volume", value: sectionValue(liquidity, "volume") },
       { label: "Amount", value: sectionValue(liquidity, "amount") },
-      { label: "Bid1 / Ask1", value: `${displayValue(sectionValue(liquidity, "bid1"))} / ${displayValue(sectionValue(liquidity, "ask1"))}` },
-      { label: "Source", value: formatSourceTime(liquidity?.source, liquidity?.fetched_at) }
+      { label: "Bid1 / Ask1", value: `${displayValue(sectionValue(liquidity, "bid1"))} / ${displayValue(sectionValue(liquidity, "ask1"))}` }
     ];
 
     return (
@@ -221,6 +230,9 @@ export function ModuleView({
               <div>
                 <h2>Market Quote Snapshot</h2>
               </div>
+              <span className="market-section-meta">
+                Source: {displayValue(quoteSnapshot?.source)} <span>Time: {formatPanelTime(quoteSnapshot?.fetched_at)}</span>
+              </span>
             </div>
             <div className="snapshot-grid module-quote-grid">
               {quoteItems.map((item) => (
@@ -238,6 +250,9 @@ export function ModuleView({
             <div>
               <h2>Valuation</h2>
             </div>
+            <span className="market-section-meta">
+              Source: {displayValue(valuation?.source)} <span>Time: {formatPanelTime(valuation?.fetched_at)}</span>
+            </span>
           </div>
           <div className="snapshot-grid module-quote-grid">
             {valuationItems.map((item) => (
@@ -254,6 +269,9 @@ export function ModuleView({
             <div>
               <h2>Price Limits</h2>
             </div>
+            <span className="market-section-meta">
+              Source: {displayValue(limits?.source)} <span>Time: {formatPanelTime(limits?.fetched_at)}</span>
+            </span>
           </div>
           <div className="snapshot-grid module-quote-grid">
             {limitItems.map((item) => (
@@ -270,6 +288,9 @@ export function ModuleView({
             <div>
               <h2>Liquidity</h2>
             </div>
+            <span className="market-section-meta">
+              Source: {displayValue(liquidity?.source)} <span>Time: {formatPanelTime(liquidity?.fetched_at)}</span>
+            </span>
           </div>
           <div className="snapshot-grid module-quote-grid">
             {liquidityItems.map((item) => (
@@ -304,7 +325,9 @@ export function ModuleView({
           </div>
           <div className="market-placeholders">
             {(marketPayload?.index_etf.entries ?? []).map((entry) => (
-              <span key={entry.symbol}>{entry.label}: {entry.symbol}</span>
+              <button key={entry.symbol} type="button" onClick={() => onSelectSymbol(entry.symbol)}>
+                {entry.label}: {entry.symbol}
+              </button>
             ))}
             {marketPayload?.index_etf.note && <span>{marketPayload.index_etf.note}</span>}
           </div>
@@ -324,8 +347,7 @@ export function ModuleView({
                   <strong>{source.source}</strong>
                   <StatusBadge status={source.status} />
                 </div>
-                <span>success: {displayValue(source.last_success_at)}</span>
-                <span>failure: {displayValue(source.last_failure_at)}</span>
+                {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
                 {source.last_error && <p>{source.last_error}</p>}
               </div>
             ))}
