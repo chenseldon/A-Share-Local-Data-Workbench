@@ -192,6 +192,44 @@ export interface ModuleDataResponse {
   module: string;
   status: FreshnessState | "not_found";
   rows: DataRow[];
+  market?: MarketModuleData;
+}
+
+export interface MarketModuleSection {
+  source?: string | null;
+  fetched_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface MarketModuleCapability {
+  status: string;
+  source: string;
+  note?: string | null;
+  rows?: DataRow[];
+  entries?: Array<{ label: string; symbol: string }>;
+}
+
+export interface MarketSourceStatus {
+  source: string;
+  module: string;
+  status: string;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error: string | null;
+  updated_at: string | null;
+}
+
+export interface MarketModuleData {
+  symbol: string | null;
+  quote_snapshot: MarketQuote | null;
+  latest_bar: MarketBar | null;
+  recent_bars: MarketBar[];
+  valuation: MarketModuleSection;
+  limits: MarketModuleSection;
+  liquidity: MarketModuleSection;
+  order_book: MarketModuleCapability;
+  index_etf: MarketModuleCapability;
+  source_status: MarketSourceStatus[];
 }
 
 export interface DataJob {

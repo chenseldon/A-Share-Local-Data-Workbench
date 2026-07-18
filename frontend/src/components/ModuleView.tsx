@@ -1,6 +1,6 @@
 import { BarChart3, FileText, ListChecks, RadioTower, RefreshCw } from "lucide-react";
 import type { ChartPeriod } from "../api";
-import type { BoardMappingResponse, ChartResponse, MarketQuote, ModuleDataResponse, ModuleDefinition, Security } from "../types";
+import type { BoardMappingResponse, ChartResponse, MarketModuleSection, MarketQuote, ModuleDataResponse, ModuleDefinition, Security } from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
@@ -39,6 +39,38 @@ function moduleEmptyLabel(module: ModuleDefinition, status: string): string {
     return `${module.layer} is mapped in the V3.4.0 architecture, but no connector is enabled yet.`;
   }
   return `No cached rows for ${module.layer} yet. Trigger collection or switch to a seeded symbol.`;
+}
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "NA";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value.toLocaleString() : "NA";
+  }
+  return String(value);
+}
+
+function sectionValue(section: MarketModuleSection | undefined, key: string): unknown {
+  return section ? section[key] : null;
+}
+
+function formatPercent(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "NA";
+  }
+  return `${value.toLocaleString()}%`;
+}
+
+function formatYi(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "NA";
+  }
+  return `${value.toLocaleString()}亿`;
+}
+
+function formatSourceTime(source?: string | null, fetchedAt?: string | null): string {
+  return [source, fetchedAt].filter(Boolean).join(" · ") || "NA";
 }
 
 export function ModuleView({
@@ -110,20 +142,49 @@ export function ModuleView({
       );
     }
 
-    const quoteItems = quote
+    const marketPayload = data?.market;
+    const quoteSnapshot = marketPayload?.quote_snapshot ?? quote;
+    const valuation = marketPayload?.valuation;
+    const limits = marketPayload?.limits;
+    const liquidity = marketPayload?.liquidity;
+
+    const quoteItems = quoteSnapshot
       ? [
-          { label: "Last price", value: quote.last_price },
-          { label: "Open", value: quote.open },
-          { label: "High", value: quote.high },
-          { label: "Low", value: quote.low },
-          { label: "Volume", value: quote.volume?.toLocaleString() ?? "NA" },
-          { label: "Amount", value: quote.amount?.toLocaleString() ?? "NA" },
-          { label: "PE TTM", value: quote.pe_ttm ?? quote.pe_static ?? "NA" },
-          { label: "PB", value: quote.pb ?? "NA" },
-          { label: "Source", value: quote.source },
-          { label: "Fetched at", value: quote.fetched_at }
+          { label: "Last price", value: quoteSnapshot.last_price },
+          { label: "Open", value: quoteSnapshot.open },
+          { label: "High", value: quoteSnapshot.high },
+          { label: "Low", value: quoteSnapshot.low },
+          { label: "Previous close", value: quoteSnapshot.previous_close },
+          { label: "Price time", value: quoteSnapshot.price_time },
+          { label: "Source", value: quoteSnapshot.source },
+          { label: "Fetched at", value: quoteSnapshot.fetched_at }
         ]
       : [];
+
+    const valuationItems = [
+      { label: "PE TTM", value: sectionValue(valuation, "pe_ttm") },
+      { label: "PE static", value: sectionValue(valuation, "pe_static") },
+      { label: "PB", value: sectionValue(valuation, "pb") },
+      { label: "Total market cap", value: formatYi(sectionValue(valuation, "total_market_cap")) },
+      { label: "Float market cap", value: formatYi(sectionValue(valuation, "float_market_cap")) },
+      { label: "Source", value: formatSourceTime(valuation?.source, valuation?.fetched_at) }
+    ];
+    const limitItems = [
+      { label: "Limit up", value: sectionValue(limits, "limit_up") },
+      { label: "Limit down", value: sectionValue(limits, "limit_down") },
+      { label: "Change amount", value: sectionValue(limits, "change_amt") },
+      { label: "Change %", value: formatPercent(sectionValue(limits, "change_pct")) },
+      { label: "Amplitude %", value: formatPercent(sectionValue(limits, "amplitude_pct")) },
+      { label: "Source", value: formatSourceTime(limits?.source, limits?.fetched_at) }
+    ];
+    const liquidityItems = [
+      { label: "Turnover %", value: formatPercent(sectionValue(liquidity, "turnover_pct")) },
+      { label: "Volume ratio", value: sectionValue(liquidity, "volume_ratio") },
+      { label: "Volume", value: sectionValue(liquidity, "volume") },
+      { label: "Amount", value: sectionValue(liquidity, "amount") },
+      { label: "Bid1 / Ask1", value: `${displayValue(sectionValue(liquidity, "bid1"))} / ${displayValue(sectionValue(liquidity, "ask1"))}` },
+      { label: "Source", value: formatSourceTime(liquidity?.source, liquidity?.fetched_at) }
+    ];
 
     return (
       <div className="content-grid security-workspace-grid module-market-grid">
@@ -151,6 +212,9 @@ export function ModuleView({
           mode="market"
         />
 
+        {loading && <div className="panel loading-panel">Loading market module data...</div>}
+        {error && <EmptyState title="Market module request failed" detail={error} />}
+
         {quoteItems.length > 0 && (
           <section className="panel market-snapshot-panel">
             <div className="section-heading">
@@ -162,26 +226,109 @@ export function ModuleView({
               {quoteItems.map((item) => (
                 <div key={item.label}>
                   <span>{item.label}</span>
-                  <strong>{item.value === null || item.value === undefined || item.value === "" ? "NA" : item.value}</strong>
+                  <strong>{displayValue(item.value)}</strong>
                 </div>
               ))}
             </div>
           </section>
         )}
 
+        <section className="panel market-snapshot-panel">
+          <div className="section-heading">
+            <div>
+              <h2>Valuation</h2>
+            </div>
+          </div>
+          <div className="snapshot-grid module-quote-grid">
+            {valuationItems.map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <strong>{displayValue(item.value)}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel market-snapshot-panel">
+          <div className="section-heading">
+            <div>
+              <h2>Price Limits</h2>
+            </div>
+          </div>
+          <div className="snapshot-grid module-quote-grid">
+            {limitItems.map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <strong>{displayValue(item.value)}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel market-snapshot-panel">
+          <div className="section-heading">
+            <div>
+              <h2>Liquidity</h2>
+            </div>
+          </div>
+          <div className="snapshot-grid module-quote-grid">
+            {liquidityItems.map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <strong>{displayValue(item.value)}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="panel module-market-strip">
           <div className="section-heading">
             <div>
-              <h2>Market Layer Coverage</h2>
-              <p>Unavailable upstream areas are shown explicitly instead of rendered as data.</p>
+              <h2>Order Book</h2>
             </div>
             <BarChart3 aria-hidden="true" size={20} />
           </div>
+          <div className="market-capability-card">
+            <StatusBadge status={marketPayload?.order_book.status ?? "not_collected"} />
+            <strong>{marketPayload?.order_book.source ?? "mootdx"}</strong>
+            <p>{marketPayload?.order_book.note ?? "No five-level order book data is available."}</p>
+          </div>
+        </section>
+
+        <section className="panel module-market-strip">
+          <div className="section-heading">
+            <div>
+              <h2>Index / ETF Entrance</h2>
+            </div>
+            <StatusBadge status={marketPayload?.index_etf.status ?? "not_configured"} />
+          </div>
           <div className="market-placeholders">
-            <span>K-line: free-stockdb</span>
-            <span>Quote: public snapshot cache</span>
-            <span>Five-level order book: Not configured</span>
-            <span>Index/ETF entrance: Not configured</span>
+            {(marketPayload?.index_etf.entries ?? []).map((entry) => (
+              <span key={entry.symbol}>{entry.label}: {entry.symbol}</span>
+            ))}
+            {marketPayload?.index_etf.note && <span>{marketPayload.index_etf.note}</span>}
+          </div>
+        </section>
+
+        <section className="panel module-market-strip">
+          <div className="section-heading">
+            <div>
+              <h2>Source Status</h2>
+            </div>
+            <RadioTower aria-hidden="true" size={20} />
+          </div>
+          <div className="market-source-grid">
+            {(marketPayload?.source_status ?? []).map((source) => (
+              <div key={source.source} className="market-source-card">
+                <div>
+                  <strong>{source.source}</strong>
+                  <StatusBadge status={source.status} />
+                </div>
+                <span>success: {displayValue(source.last_success_at)}</span>
+                <span>failure: {displayValue(source.last_failure_at)}</span>
+                {source.last_error && <p>{source.last_error}</p>}
+              </div>
+            ))}
           </div>
         </section>
       </div>

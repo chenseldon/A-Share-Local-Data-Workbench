@@ -249,6 +249,18 @@ def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None
             amount=187000000.0,
             bid1=1518.4,
             ask1=1518.6,
+            change_amt=8.5,
+            change_pct=0.56,
+            turnover_pct=1.2,
+            pe_ttm=24.8,
+            amplitude_pct=2.1,
+            total_market_cap=19800.0,
+            float_market_cap=18900.0,
+            pb=8.6,
+            limit_up=1661.0,
+            limit_down=1359.0,
+            volume_ratio=1.05,
+            pe_static=25.1,
             source="tencent_quote",
             fetched_at=fetched_at,
             raw_payload_hash="quote-hash",
@@ -289,6 +301,17 @@ def test_refresh_quote_and_chart_are_cached(tmp_path: Path, monkeypatch) -> None
         rows = chart.json()["rows"]
         assert len(rows) == 21
         assert rows[-1]["ma20"] is not None
+
+        market = client.get("/api/modules/market/data?symbol=600519.SH")
+        assert market.status_code == 200
+        market_payload = market.json()["market"]
+        assert market_payload["valuation"]["pe_ttm"] == 24.8
+        assert market_payload["valuation"]["pb"] == 8.6
+        assert market_payload["limits"]["amplitude_pct"] == 2.1
+        assert market_payload["limits"]["limit_up"] == 1661.0
+        assert market_payload["liquidity"]["turnover_pct"] == 1.2
+        assert market_payload["order_book"]["status"] == "optional_dependency_missing"
+        assert market_payload["index_etf"]["status"] == "not_configured"
 
 
 def test_chart_indicators_are_merged_on_demand(tmp_path: Path, monkeypatch) -> None:

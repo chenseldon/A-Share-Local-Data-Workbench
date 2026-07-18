@@ -852,7 +852,7 @@ p {
   align-items: center;
   flex: 0 0 auto;
   gap: 2px;
-  height: 34px;
+  height: 30px;
   padding: 3px;
   border: 1px solid rgba(216, 224, 232, 0.14);
   border-radius: 8px;
@@ -862,7 +862,7 @@ p {
 .chart-periods button {
   display: inline-grid;
   min-width: 30px;
-  height: 26px;
+  height: 22px;
   place-items: center;
   border-radius: 6px;
   background: transparent;
@@ -879,9 +879,9 @@ p {
 }
 
 .chart-actions .secondary-button {
-  height: 34px;
-  padding: 0 10px;
-  font-size: 12px;
+  height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
   white-space: nowrap;
   border-color: rgba(216, 224, 232, 0.18);
   background: #172330;
@@ -1235,6 +1235,62 @@ p {
 
 .module-quote-grid {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.market-capability-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(216, 224, 232, 0.12);
+  border-radius: 8px;
+  background: #172330;
+  color: #ccd8df;
+}
+
+.market-capability-card strong {
+  color: #eef4f7;
+  font-size: 15px;
+}
+
+.market-capability-card p {
+  margin: 0;
+}
+
+.market-source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.market-source-card {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid rgba(216, 224, 232, 0.12);
+  border-radius: 8px;
+  background: #172330;
+  color: #ccd8df;
+  font-size: 12px;
+}
+
+.market-source-card > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.market-source-card strong {
+  overflow: hidden;
+  color: #eef4f7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-source-card span,
+.market-source-card p {
+  margin: 0;
+  color: #9fb0bd;
 }
 
 .chart-warning {
@@ -1664,15 +1720,26 @@ tr:last-child td {
   .module-quote-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .market-source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1180px) {
   .chart-title-block {
+    order: 1;
     flex-basis: 100%;
   }
 
-  .chart-periods,
+  .chart-periods {
+    order: 2;
+    justify-content: flex-start;
+  }
+
   .chart-actions {
+    order: 3;
+    flex-basis: 100%;
     justify-content: flex-start;
   }
 }
@@ -1758,6 +1825,10 @@ tr:last-child td {
 
   .module-quote-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .market-source-grid {
+    grid-template-columns: 1fr;
   }
 
   .trading-chart-shell {

@@ -318,6 +318,7 @@ export function KLineChart(props: KLineChartProps) {
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const mainSeriesRefs = useRef<Array<{ id: string; field: string; color: string; series: ISeriesApi<"Line"> }>>([]);
   const paneSeriesRefs = useRef<Record<string, Array<{ id: string; field: string; color: string; series: ISeriesApi<"Line"> | ISeriesApi<"Histogram"> }>>>({});
+  const visibleRangeRef = useRef<{ key: string; range: LogicalRange } | null>(null);
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -364,6 +365,9 @@ export function KLineChart(props: KLineChartProps) {
   const legendChange = legendRow ? rowChangePercent(legendRow) : null;
   const displaySymbol = security?.symbol ?? quote?.symbol ?? "No symbol selected";
   const displayName = security?.name ?? sourceLabel(rows, quote);
+  const visibleRangeKey = `${displaySymbol}|${period ?? "1d"}|${String(chartRows[0] ? rowTime(chartRows[0]) : "")}|${String(
+    chartRows[chartRows.length - 1] ? rowTime(chartRows[chartRows.length - 1]) : ""
+  )}|${chartRows.length}`;
   const mainLegendRows = selectedIndicators
     .filter((indicator) => indicator.placement === "overlay")
     .map((indicator) => ({
@@ -660,6 +664,7 @@ export function KLineChart(props: KLineChartProps) {
       if (syncing || !range) {
         return;
       }
+      visibleRangeRef.current = { key: visibleRangeKey, range };
       syncing = true;
       allCharts.forEach((chart) => {
         if (chart !== source) {
@@ -828,9 +833,17 @@ export function KLineChart(props: KLineChartProps) {
       chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
       unsubscribeHandlers.push({ chart, handler });
     });
-    mainChart.timeScale().fitContent();
+    const cachedRange = visibleRangeRef.current?.key === visibleRangeKey ? visibleRangeRef.current.range : null;
+    if (cachedRange) {
+      mainChart.timeScale().setVisibleLogicalRange(cachedRange);
+    } else if (chartRows.length > 500) {
+      mainChart.timeScale().setVisibleLogicalRange({ from: chartRows.length - 500, to: chartRows.length - 1 });
+    } else {
+      mainChart.timeScale().fitContent();
+    }
     const currentRange = mainChart.timeScale().getVisibleLogicalRange();
     if (currentRange) {
+      visibleRangeRef.current = { key: visibleRangeKey, range: currentRange };
       allCharts.slice(1).forEach((chart) => chart.timeScale().setVisibleLogicalRange(currentRange));
     }
     window.setTimeout(() => updateAxisValueLabels(chartRows[chartRows.length - 1] ?? null), 0);
@@ -844,7 +857,7 @@ export function KLineChart(props: KLineChartProps) {
       mainSeriesRefs.current = [];
       paneSeriesRefs.current = {};
     };
-  }, [chartRows, enabledIndicators, mainChartHeight, paneHeight]);
+  }, [chartRows, enabledIndicators, mainChartHeight, paneHeight, visibleRangeKey]);
 
   function renderDrawing(drawing: Drawing, isDraft = false) {
     const points = drawing.points.map(pointToCoordinate).filter((point): point is { x: number; y: number } => Boolean(point));

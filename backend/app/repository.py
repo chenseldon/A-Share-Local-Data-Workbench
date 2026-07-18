@@ -652,9 +652,11 @@ class DataRepository:
         module = MODULE_BY_ID.get(module_id)
         if module is None:
             return {"module": module_id, "status": "not_found", "rows": []}
+        market_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
             rows = ([quote] if quote else []) + self._list_market_bars(symbol, limit)
+            market_payload = self._market_layer_payload(symbol, limit)
         elif module_id == "fundamentals":
             rows = self._list_fundamentals(symbol, limit)
         elif module_id == "announcements":
@@ -672,7 +674,108 @@ class DataRepository:
         else:
             rows = []
         status = "ok" if rows else ("not_collected" if module.status != "not_configured" else "not_configured")
-        return {"module": module_id, "status": status, "rows": rows}
+        result: dict[str, Any] = {"module": module_id, "status": status, "rows": rows}
+        if market_payload is not None:
+            result["market"] = market_payload
+        return result
+
+    def _market_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        quote = self.latest_market_quote(symbol) if symbol else None
+        latest_bar = self._latest_market_bar(symbol) if symbol else None
+        recent_bars = self._list_market_bars(symbol, min(limit, 20))
+        source_status = self._market_source_status()
+        fetched_at = quote.get("fetched_at") if quote else (latest_bar.get("fetched_at") if latest_bar else None)
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "quote_snapshot": quote,
+            "latest_bar": latest_bar,
+            "recent_bars": recent_bars,
+            "valuation": {
+                "pe_ttm": quote.get("pe_ttm") if quote else None,
+                "pe_static": quote.get("pe_static") if quote else None,
+                "pb": quote.get("pb") if quote else None,
+                "total_market_cap": quote.get("total_market_cap") if quote else None,
+                "float_market_cap": quote.get("float_market_cap") if quote else None,
+                "source": quote.get("source") if quote else "tencent_quote",
+                "fetched_at": fetched_at,
+            },
+            "limits": {
+                "limit_up": quote.get("limit_up") if quote else None,
+                "limit_down": quote.get("limit_down") if quote else None,
+                "change_amt": quote.get("change_amt") if quote else None,
+                "change_pct": quote.get("change_pct") if quote else None,
+                "amplitude_pct": quote.get("amplitude_pct") if quote else None,
+                "source": quote.get("source") if quote else "tencent_quote",
+                "fetched_at": fetched_at,
+            },
+            "liquidity": {
+                "turnover_pct": quote.get("turnover_pct") if quote else None,
+                "volume_ratio": quote.get("volume_ratio") if quote else None,
+                "volume": quote.get("volume") if quote else None,
+                "amount": quote.get("amount") if quote else None,
+                "bid1": quote.get("bid1") if quote else None,
+                "ask1": quote.get("ask1") if quote else None,
+                "source": quote.get("source") if quote else "tencent_quote",
+                "fetched_at": fetched_at,
+            },
+            "order_book": {
+                "status": "optional_dependency_missing",
+                "source": "mootdx",
+                "rows": [],
+                "note": "a-stock-data maps five-level order book to mootdx; this optional dependency is not enabled in the workbench runtime.",
+            },
+            "index_etf": {
+                "status": "not_configured",
+                "source": "Tencent Finance",
+                "entries": [
+                    {"label": "SSE Composite", "symbol": "000001.SH"},
+                    {"label": "CSI 300", "symbol": "000300.SH"},
+                    {"label": "ChiNext", "symbol": "399006.SZ"},
+                    {"label": "SSE 50 ETF", "symbol": "510050.SH"},
+                    {"label": "CSI 300 ETF", "symbol": "510300.SH"},
+                ],
+                "note": "Tencent supports index and ETF quote codes; module-level browsing is not configured yet.",
+            },
+            "source_status": source_status,
+        }
+
+    def _market_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'market'
+            ORDER BY source
+            """
+        )
+        known_sources = {
+            str(row["source"]) for row in rows
+        }
+        if "mootdx" not in known_sources:
+            rows.append(
+                {
+                    "source": "mootdx",
+                    "module": "market",
+                    "status": "optional_dependency_missing",
+                    "last_success_at": None,
+                    "last_failure_at": None,
+                    "last_error": "Optional dependency is not enabled.",
+                    "updated_at": None,
+                }
+            )
+        if "tencent_quote" not in known_sources:
+            rows.append(
+                {
+                    "source": "tencent_quote",
+                    "module": "market",
+                    "status": "not_collected",
+                    "last_success_at": None,
+                    "last_failure_at": None,
+                    "last_error": None,
+                    "updated_at": None,
+                }
+            )
+        return rows
 
     def _list_market_bars(self, symbol: str | None, limit: int) -> list[dict[str, Any]]:
         if symbol:
