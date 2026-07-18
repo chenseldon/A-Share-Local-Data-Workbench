@@ -356,7 +356,7 @@ export function KLineChart(props: KLineChartProps) {
   const boardTags = [security?.exchange, security?.asset_type, primarySector, ...(boards?.concepts ?? [])].filter(
     (tag): tag is string => Boolean(tag)
   );
-  const visibleBoardTags = boardTags.slice(0, 3);
+  const visibleBoardTags = boardTags.slice(0, 6);
   const hiddenBoardTagCount = Math.max(0, boardTags.length - visibleBoardTags.length);
   const boardTitle = boardTags.join(" / ");
   const visibleSearchResults = searchResults.slice(0, 5);
@@ -1084,14 +1084,6 @@ export function KLineChart(props: KLineChartProps) {
         </div>
         <div className="chart-main">
           <div className={legendCollapsed ? "chart-legend collapsed" : "chart-legend"} aria-label="Chart legend">
-            <button
-              className="legend-collapse"
-              type="button"
-              onClick={() => setLegendCollapsed((collapsed) => !collapsed)}
-              title={legendCollapsed ? "Show indicators" : "Hide indicators"}
-            >
-              {legendCollapsed ? <Plus aria-hidden="true" size={14} /> : <ChevronUp aria-hidden="true" size={14} />}
-            </button>
             <div className="legend-content">
               <div className="legend-quote-row">
                 <strong>{security?.symbol ?? "K-Line"}</strong>
@@ -1112,6 +1104,14 @@ export function KLineChart(props: KLineChartProps) {
               </div>
               {!legendCollapsed && mainLegendRows.length > 0 && (
                 <div className="legend-indicator-grid">
+                  <button
+                    className="legend-collapse"
+                    type="button"
+                    onClick={() => setLegendCollapsed((collapsed) => !collapsed)}
+                    title="Hide indicators"
+                  >
+                    <ChevronUp aria-hidden="true" size={14} />
+                  </button>
                   {mainLegendRows.map(({ indicator, fields }) => (
                     <div className="legend-indicator-row" key={indicator.id}>
                       <span>{indicator.label}</span>
@@ -1125,6 +1125,18 @@ export function KLineChart(props: KLineChartProps) {
                       })}
                     </div>
                   ))}
+                </div>
+              )}
+              {legendCollapsed && mainLegendRows.length > 0 && (
+                <div className="legend-indicator-grid">
+                  <button
+                    className="legend-collapse"
+                    type="button"
+                    onClick={() => setLegendCollapsed((collapsed) => !collapsed)}
+                    title="Show indicators"
+                  >
+                    <Plus aria-hidden="true" size={14} />
+                  </button>
                 </div>
               )}
               {indicatorStatus === "failed" && <span className="chart-warning">{indicatorError ?? "Indicator calculation failed"}</span>}

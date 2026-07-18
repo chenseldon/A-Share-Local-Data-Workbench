@@ -875,13 +875,21 @@ def fetch_free_stockdb_daily_bars(
 
 
 def _default_frequency_window(frequency: str) -> timedelta:
-    if frequency in {"1m", "5m", "15m", "30m", "60m"}:
-        return timedelta(days=30)
+    if frequency == "1m":
+        return timedelta(days=20)
+    if frequency == "5m":
+        return timedelta(days=100)
+    if frequency == "15m":
+        return timedelta(days=240)
+    if frequency == "30m":
+        return timedelta(days=430)
+    if frequency == "60m":
+        return timedelta(days=850)
     if frequency == "1w":
-        return timedelta(days=365 * 5)
+        return timedelta(days=365 * 28)
     if frequency == "1M":
-        return timedelta(days=365 * 12)
-    return timedelta(days=420)
+        return timedelta(days=365 * 28)
+    return timedelta(days=365 * 12)
 
 
 def _stockdb_rows_to_market_bars(

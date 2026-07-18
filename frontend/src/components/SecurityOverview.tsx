@@ -226,7 +226,6 @@ export function SecurityOverview({
           <div className="section-heading">
             <div>
               <h2>Market Snapshot</h2>
-              <p>Latest local quote fields. Missing values are shown as NA.</p>
             </div>
           </div>
           <div className="snapshot-grid">
@@ -245,7 +244,6 @@ export function SecurityOverview({
           <div className="section-heading">
             <div>
               <h2>Announcements</h2>
-              <p>Fetched on confirmed symbol refresh; titles link to the source page when available.</p>
             </div>
           </div>
           <DataTable
@@ -267,7 +265,6 @@ export function SecurityOverview({
           <div className="section-heading">
             <div>
               <h2>Research Reports</h2>
-              <p>Fetched on confirmed symbol refresh; titles link to the source page when available.</p>
             </div>
           </div>
           <DataTable

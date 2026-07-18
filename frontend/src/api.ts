@@ -99,8 +99,7 @@ export function fetchSecurityChart(
   indicators: string[] = ["ma"],
   period: ChartPeriod = "1d"
 ): Promise<ChartResponse> {
-  const limit = period.endsWith("m") ? "300" : period === "1d" ? "260" : "240";
-  const params = new URLSearchParams({ period, adjustment: "auto", limit });
+  const params = new URLSearchParams({ period, adjustment: "auto", limit: "2000" });
   if (indicators.length > 0) {
     params.set("indicators", indicators.join(","));
   }

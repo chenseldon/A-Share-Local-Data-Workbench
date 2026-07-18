@@ -682,16 +682,16 @@ p {
   display: flex;
   align-items: flex-start;
   flex-wrap: wrap;
-  gap: 10px 12px;
+  gap: 8px 10px;
   margin: 0;
-  padding: 14px 18px 12px;
+  padding: 12px 18px 10px;
   border-bottom: 1px solid rgba(216, 224, 232, 0.12);
 }
 
 .chart-title-block {
   position: relative;
   display: grid;
-  flex: 1 1 280px;
+  flex: 1 1 420px;
   gap: 7px;
   min-width: 0;
 }
@@ -814,7 +814,7 @@ p {
 .chart-security-meta {
   display: flex;
   flex-wrap: nowrap;
-  gap: 7px;
+  gap: 6px;
   max-width: 100%;
   overflow: hidden;
 }
@@ -823,9 +823,9 @@ p {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  min-height: 24px;
-  max-width: 132px;
-  padding: 0 8px;
+  min-height: 22px;
+  max-width: 116px;
+  padding: 0 7px;
   border: 1px solid rgba(216, 224, 232, 0.14);
   border-radius: 7px;
   background: #172330;
@@ -844,7 +844,7 @@ p {
   align-items: center;
   justify-content: flex-end;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 6px;
 }
 
 .chart-periods {
@@ -852,8 +852,8 @@ p {
   align-items: center;
   flex: 0 0 auto;
   gap: 2px;
-  height: 42px;
-  padding: 5px;
+  height: 34px;
+  padding: 3px;
   border: 1px solid rgba(216, 224, 232, 0.14);
   border-radius: 8px;
   background: #0b1118;
@@ -861,13 +861,13 @@ p {
 
 .chart-periods button {
   display: inline-grid;
-  min-width: 34px;
-  height: 32px;
+  min-width: 30px;
+  height: 26px;
   place-items: center;
   border-radius: 6px;
   background: transparent;
   color: #ccd8df;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   cursor: pointer;
 }
@@ -879,7 +879,9 @@ p {
 }
 
 .chart-actions .secondary-button {
-  height: 42px;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
   white-space: nowrap;
   border-color: rgba(216, 224, 232, 0.18);
   background: #172330;
@@ -1125,9 +1127,6 @@ p {
 .chart-legend {
   position: relative;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
   min-height: 48px;
   padding: 8px 18px;
   color: #9fb0bd;
@@ -1153,7 +1152,7 @@ p {
 
 .legend-content {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1168,13 +1167,13 @@ p {
 
 .legend-quote-row {
   color: #cdd8e1;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.25;
 }
 
 .legend-quote-row strong {
   color: #eef4f7;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 900;
 }
 
@@ -1188,11 +1187,13 @@ p {
 
 .legend-indicator-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: start;
 }
 
 .legend-indicator-row {
+  grid-column: 2;
   overflow: hidden;
   white-space: nowrap;
 }

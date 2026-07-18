@@ -363,6 +363,7 @@ def test_chart_period_uses_free_stockdb_frequency(tmp_path: Path, monkeypatch) -
     def fake_bars(symbol: str, **kwargs: object) -> tuple[MarketBar, ...]:
         assert symbol == "600004.SH"
         assert kwargs["frequency"] == "1m"
+        assert kwargs["limit"] == 2000
         return (
             MarketBar(
                 symbol="600004.SH",
@@ -389,6 +390,9 @@ def test_chart_period_uses_free_stockdb_frequency(tmp_path: Path, monkeypatch) -
         payload = chart.json()
         assert payload["period"] == "1m"
         assert payload["rows"][0]["chart_time"] == 1784165460
+
+        explicit_limit = client.get("/api/security/600004.SH/chart?period=1m&limit=2000")
+        assert explicit_limit.status_code == 200
 
         invalid = client.get("/api/security/600004.SH/chart?period=4h")
         assert invalid.status_code == 422

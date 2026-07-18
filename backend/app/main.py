@@ -204,7 +204,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         symbol: str,
         period: str = Query(default="1d", pattern="^(1m|5m|15m|30m|60m|1d|1w|1M)$"),
         adjustment: str = Query(default="auto", pattern="^(auto|none|qfq|hfq)$"),
-        limit: int = Query(default=120, ge=1, le=500),
+        limit: int = Query(default=2000, ge=1, le=2000),
         indicators: str | None = Query(default=None),
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:

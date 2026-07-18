@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type ChartPeriod,
   fetchConnectorCapabilities,
@@ -79,6 +79,7 @@ export default function App() {
   const [moduleData, setModuleData] = useState<ModuleDataResponse | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
+  const refreshFirstSymbolRef = useRef<string | null>(null);
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
@@ -156,6 +157,9 @@ export default function App() {
     if (!selectedSymbol) {
       setOverview(null);
       setChart(null);
+      return;
+    }
+    if (refreshFirstSymbolRef.current === selectedSymbol) {
       return;
     }
     setOverviewLoading(true);
@@ -239,40 +243,19 @@ export default function App() {
   }, [activeView, loadSystem]);
 
   function handleSelectSymbol(symbol: string) {
+    refreshFirstSymbolRef.current = symbol;
     setSelectedSymbol(symbol);
     setQuery("");
     setSearchResults([]);
     setActiveView("security");
+    setOverview(null);
+    setChart(null);
+    setBoards(null);
     setOverviewLoading(true);
     setChartLoading(true);
     setOverviewError(null);
     setChartError(null);
     setBoardError(null);
-    fetchSecurityOverview(symbol)
-      .then((overviewResponse) => {
-        setOverview(overviewResponse);
-      })
-      .catch((error: unknown) => {
-        setOverview(null);
-        setOverviewError(errorMessage(error));
-      })
-      .finally(() => setOverviewLoading(false));
-    fetchSecurityChart(symbol, chartIndicators, chartPeriod)
-      .then(setChart)
-      .catch((error: unknown) => {
-        setChart(null);
-        setChartError(errorMessage(error));
-      })
-      .finally(() => setChartLoading(false));
-    fetchSecurityBoards(symbol)
-      .then((response) => {
-        setBoards(response);
-        setBoardError(null);
-      })
-      .catch((error: unknown) => {
-        setBoards(null);
-        setBoardError(errorMessage(error));
-      });
     void runFullRefresh(symbol);
   }
 
@@ -286,6 +269,8 @@ export default function App() {
     }
     setToast(null);
     setMarketRefreshing(true);
+    setOverviewError(null);
+    setChartError(null);
     setUpdateProgress({ active: true, percent: 5, message: "Checking symbol directory..." });
     const failures: string[] = [];
     try {
@@ -328,8 +313,16 @@ export default function App() {
         message: failures.length ? `${failures.join(", ")} \u90e8\u5206\u63d0\u53d6\u5931\u8d25` : "\u66f4\u65b0\u6210\u529f",
       });
     } catch (error: unknown) {
-      setToast({ kind: "failed", message: errorMessage(error) });
+      const message = errorMessage(error);
+      setOverviewError(message);
+      setChartError(message);
+      setToast({ kind: "failed", message });
     } finally {
+      if (refreshFirstSymbolRef.current === targetSymbol) {
+        refreshFirstSymbolRef.current = null;
+      }
+      setOverviewLoading(false);
+      setChartLoading(false);
       setMarketRefreshing(false);
       setTimeout(() => setUpdateProgress(null), 900);
       setTimeout(() => setToast(null), 4200);

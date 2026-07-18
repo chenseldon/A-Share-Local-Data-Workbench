@@ -156,7 +156,6 @@ export function ModuleView({
             <div className="section-heading">
               <div>
                 <h2>Market Quote Snapshot</h2>
-                <p>Latest cached quote fields for the current symbol.</p>
               </div>
             </div>
             <div className="snapshot-grid module-quote-grid">
