@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -653,6 +655,7 @@ class DataRepository:
         if module is None:
             return {"module": module_id, "status": "not_found", "rows": []}
         market_payload = None
+        reports_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
             rows = ([quote] if quote else []) + self._list_market_bars(symbol, limit)
@@ -663,6 +666,7 @@ class DataRepository:
             rows = self.list_announcements(symbol, limit)
         elif module_id == "reports":
             rows = self.list_reports(symbol, limit)
+            reports_payload = self._reports_layer_payload(symbol, limit)
         elif module_id == "chip_liquidity":
             rows = self.list_money_flow(symbol, limit)
         elif module_id == "signals":
@@ -677,7 +681,138 @@ class DataRepository:
         result: dict[str, Any] = {"module": module_id, "status": status, "rows": rows}
         if market_payload is not None:
             result["market"] = market_payload
+        if reports_payload is not None:
+            result["reports"] = reports_payload
         return result
+
+    def _reports_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        stock_reports = self.list_reports(symbol, limit)
+        industry_reports = [
+            row
+            for row in self._list_module_records("reports", symbol, limit)
+            if row.get("source") == "eastmoney_industry_reports"
+        ]
+        latest_report = stock_reports[0] if stock_reports else None
+        eps_forecast = _parse_eps_forecast(latest_report.get("eps_forecast") if latest_report else None)
+        source_status = self._reports_source_status()
+        latest_source = latest_report.get("source") if latest_report else None
+        latest_time = latest_report.get("fetched_at") if latest_report else None
+        latest_industry_time = industry_reports[0].get("fetched_at") if industry_reports else None
+        sections = [
+            {
+                "id": "coverage",
+                "title": "Coverage Snapshot",
+                "source": latest_source or "eastmoney_reports",
+                "fetched_at": latest_time,
+                "cards": [
+                    {"label": "Company reports", "value": len(stock_reports)},
+                    {"label": "Industry reports", "value": len(industry_reports)},
+                    {"label": "Latest rating", "value": latest_report.get("rating") if latest_report else None},
+                    {"label": "Latest institution", "value": latest_report.get("institution") if latest_report else None},
+                    {"label": "Latest report date", "value": latest_report.get("report_date") if latest_report else None},
+                    {"label": "Latest analyst", "value": latest_report.get("analyst") if latest_report else None},
+                ],
+            },
+            {
+                "id": "eps_forecast",
+                "title": "EPS Forecast",
+                "source": latest_source or "eastmoney_reports",
+                "fetched_at": latest_time,
+                "cards": [
+                    {"label": "This-year EPS", "value": eps_forecast.get("this_year")},
+                    {"label": "Next-year EPS", "value": eps_forecast.get("next_year")},
+                    {"label": "Next-two-year EPS", "value": eps_forecast.get("next_two_year")},
+                    {"label": "Consensus EPS", "value": _source_status_label(source_status, "ths_eps_forecast")},
+                    {"label": "iwencai NL search", "value": _source_status_label(source_status, "iwencai_search")},
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_industry_time or latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "eastmoney_reports", "Company reports"),
+                    _source_capability_card(source_status, "eastmoney_industry_reports", "Industry reports"),
+                    {"label": "PDF URL", "value": "prepared", "status": "prepared"},
+                    _source_capability_card(source_status, "ths_eps_forecast", "10jqka EPS"),
+                    _source_capability_card(source_status, "iwencai_search", "iwencai"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "stock_reports",
+                "title": "Company Reports",
+                "rows": stock_reports,
+                "columns": [
+                    {"key": "title", "label": "Title"},
+                    {"key": "report_date", "label": "Report date"},
+                    {"key": "institution", "label": "Institution"},
+                    {"key": "analyst", "label": "Analyst"},
+                    {"key": "rating", "label": "Rating"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "industry_reports",
+                "title": "Industry Reports",
+                "rows": industry_reports,
+                "columns": [
+                    {"key": "title", "label": "Title"},
+                    {"key": "report_date", "label": "Report date"},
+                    {"key": "industry", "label": "Industry"},
+                    {"key": "industry_code", "label": "Industry code"},
+                    {"key": "institution", "label": "Institution"},
+                    {"key": "rating", "label": "Rating"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _reports_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'reports'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "eastmoney_reports": {"status": "not_collected", "last_error": None},
+            "eastmoney_industry_reports": {"status": "not_collected", "last_error": None},
+            "ths_eps_forecast": {
+                "status": "prepared" if importlib.util.find_spec("pandas") is not None else "optional_dependency_missing",
+                "last_error": None if importlib.util.find_spec("pandas") is not None else "Optional dependency pandas is not installed.",
+            },
+            "iwencai_search": {
+                "status": "prepared" if os.getenv("IWENCAI_API_KEY") else "needs_key",
+                "last_error": None if os.getenv("IWENCAI_API_KEY") else "IWENCAI_API_KEY is not configured.",
+            },
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "reports",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
 
     def _market_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         quote = self.latest_market_quote(symbol) if symbol else None
@@ -933,6 +1068,30 @@ def _moving_average(values: list[float | None], window: int) -> float | None:
 
 def json_dumps(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _parse_eps_forecast(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _source_status_label(rows: list[dict[str, Any]], source: str) -> str:
+    for row in rows:
+        if row.get("source") == source:
+            return str(row.get("status") or "not_collected").replace("_", " ")
+    return "not collected"
+
+
+def _source_capability_card(rows: list[dict[str, Any]], source: str, label: str) -> dict[str, Any]:
+    for row in rows:
+        if row.get("source") == source:
+            return {"label": label, "value": _source_status_label(rows, source), "status": row.get("status")}
+    return {"label": label, "value": "not collected", "status": "not_collected"}
 
 
 def _flatten_module_record(row: dict[str, Any]) -> dict[str, Any]:

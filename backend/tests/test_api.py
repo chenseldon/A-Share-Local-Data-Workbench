@@ -77,7 +77,8 @@ def test_default_startup_removes_fixture_rows(tmp_path: Path) -> None:
         assert search.json()["rows"] == []
 
 
-def test_capabilities_registry_is_exposed(tmp_path: Path) -> None:
+def test_capabilities_registry_is_exposed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("IWENCAI_API_KEY", raising=False)
     db_path = tmp_path / "capabilities.duckdb"
     app = create_app(db_path)
     with TestClient(app) as client:
@@ -85,10 +86,13 @@ def test_capabilities_registry_is_exposed(tmp_path: Path) -> None:
         assert response.status_code == 200
         rows = response.json()["rows"]
         assert any(row["function"] == "tencent_quote" and row["status"] == "wired" for row in rows)
+        assert any(row["function"] == "eastmoney_industry_reports" and row["status"] == "wired" for row in rows)
+        assert any(row["function"] == "eastmoney_pdf_url" and row["status"] == "prepared" for row in rows)
         assert any(row["function"] == "iwencai_search" and row["status"] == "needs_key" for row in rows)
 
 
 def test_module_refresh_reports_uses_connector_and_cache(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("IWENCAI_API_KEY", raising=False)
     db_path = tmp_path / "module-refresh.duckdb"
 
     def fake_reports(symbol: str, max_pages: int = 1) -> list[dict[str, object]]:
@@ -105,18 +109,45 @@ def test_module_refresh_reports_uses_connector_and_cache(tmp_path: Path, monkeyp
             }
         ]
 
+    def fake_industry_reports(industry_code: str = "*", max_pages: int = 1) -> list[dict[str, object]]:
+        assert industry_code == "*"
+        assert max_pages == 1
+        return [
+            {
+                "infoCode": "654321",
+                "title": "Mock industry report",
+                "publishDate": "2026-07-14 08:00:00",
+                "industryName": "Food & Beverage",
+                "industryCode": "BK001",
+                "orgSName": "Industry Securities",
+                "emRatingName": "Overweight",
+            }
+        ]
+
     monkeypatch.setattr("app.main.eastmoney_reports", fake_reports)
+    monkeypatch.setattr("app.main.eastmoney_industry_reports", fake_industry_reports)
     app = create_app(db_path)
     with TestClient(app) as client:
         refresh = client.post("/api/modules/reports/refresh?symbol=600519.SH")
         assert refresh.status_code == 200
-        assert refresh.json()["records_written"] == 1
+        assert refresh.json()["records_written"] == 2
+        assert refresh.json()["optional_results"]["eastmoney_industry_reports"]["status"] == "fresh"
 
         data = client.get("/api/modules/reports/data?symbol=600519.SH")
         assert data.status_code == 200
         payload = data.json()
         assert payload["status"] == "ok"
         assert payload["rows"][0]["title"] == "Mock report"
+        assert payload["reports"]["sections"][0]["cards"][0]["value"] == 1
+        assert payload["reports"]["sections"][0]["cards"][1]["value"] == 1
+        assert payload["reports"]["tables"][0]["rows"][0]["url"].endswith("H3_123456_1.pdf")
+        assert payload["reports"]["tables"][1]["rows"][0]["title"] == "Mock industry report"
+        assert any(
+            card["label"] == "PDF URL" and card["status"] == "prepared"
+            for section in payload["reports"]["sections"]
+            for card in section["cards"]
+        )
+        assert any(row["source"] == "iwencai_search" and row["status"] == "needs_key" for row in payload["reports"]["source_status"])
 
 
 def test_symbol_normalization() -> None:

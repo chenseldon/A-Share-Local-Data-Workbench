@@ -242,12 +242,12 @@ export default function App() {
     }
   }, [activeView, loadSystem]);
 
-  function handleSelectSymbol(symbol: string) {
+  function handleSelectSymbol(symbol: string, keepCurrentModule = false) {
     refreshFirstSymbolRef.current = symbol;
     setSelectedSymbol(symbol);
     setQuery("");
     setSearchResults([]);
-    setActiveView("security");
+    setActiveView(keepCurrentModule && activeView === "module" ? "module" : "security");
     setOverview(null);
     setChart(null);
     setBoards(null);
@@ -307,6 +307,11 @@ export default function App() {
       await fetchSourceHealth()
         .then((response) => setSources(response.rows))
         .catch(() => setSources([]));
+      if (activeView === "module") {
+        await fetchModuleData(activeModule, targetSymbol)
+          .then(setModuleData)
+          .catch((error: unknown) => setModuleError(errorMessage(error)));
+      }
       setUpdateProgress({ active: true, percent: 100, message: failures.length ? "Update finished with failed modules." : "Update complete." });
       setToast({
         kind: failures.length ? "failed" : "success",
@@ -354,8 +359,8 @@ export default function App() {
       .finally(() => setModuleRefreshing(false));
   }
 
-  const marketModuleActive = activeView === "module" && activeModule === "market";
-  const darkWorkspaceActive = activeView === "security" || marketModuleActive;
+  const darkModuleActive = activeView === "module" && ["market", "reports"].includes(activeModule);
+  const darkWorkspaceActive = activeView === "security" || darkModuleActive;
 
   return (
     <div className="app-shell">
@@ -404,7 +409,7 @@ export default function App() {
               searchResults={searchResults}
               isSearching={isSearching}
               onSearchQueryChange={setQuery}
-              onSelectSymbol={handleSelectSymbol}
+              onSelectSymbol={(symbol) => handleSelectSymbol(symbol)}
               apiHealthError={apiHealthError}
             />
           )}
@@ -434,7 +439,7 @@ export default function App() {
               searchResults={searchResults}
               isSearching={isSearching}
               onSearchQueryChange={setQuery}
-              onSelectSymbol={handleSelectSymbol}
+              onSelectSymbol={(symbol) => handleSelectSymbol(symbol, true)}
             />
           )}
           {activeView === "system" && (

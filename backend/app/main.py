@@ -14,8 +14,10 @@ from .connectors.astock_sources import (
     AStockSourceError,
     cninfo_announcements,
     eastmoney_concept_blocks,
+    eastmoney_industry_reports,
     eastmoney_reports,
     eastmoney_stock_info,
+    normalize_eastmoney_industry_report,
     normalize_eastmoney_report,
     sina_financial_report,
     stock_fund_flow_120d,
@@ -367,7 +369,33 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             raise ValueError("Reports refresh requires a symbol.")
         fetched_at = datetime.now(UTC)
         reports = [normalize_eastmoney_report(symbol, record, fetched_at) for record in eastmoney_reports(symbol, max_pages=1)]
-        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_reports(reports)}
+        records_written = repository.save_reports(reports)
+        if not reports:
+            repository.record_source_success("reports", "eastmoney_reports", 0)
+        optional_results: dict[str, object] = {}
+        try:
+            industry_records = [
+                normalize_eastmoney_industry_report(symbol, record, fetched_at)
+                for record in eastmoney_industry_reports(industry_code="*", max_pages=1)
+            ]
+            industry_written = repository.save_module_records(industry_records)
+            if not industry_records:
+                repository.record_source_success("reports", "eastmoney_industry_reports", 0)
+            optional_results["eastmoney_industry_reports"] = {
+                "status": "fresh",
+                "records_written": industry_written,
+            }
+            records_written += industry_written
+        except AStockSourceError as exc:
+            repository.record_source_failure("reports", "eastmoney_industry_reports", str(exc))
+            optional_results["eastmoney_industry_reports"] = {"status": "failed", "error": str(exc)}
+        return {
+            "module": module_id,
+            "symbol": symbol,
+            "status": "fresh",
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
 
     if module_id == "announcements":
         if not symbol:

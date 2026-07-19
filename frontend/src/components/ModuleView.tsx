@@ -1,6 +1,16 @@
 import { BarChart3, FileText, ListChecks, RadioTower, RefreshCw } from "lucide-react";
 import type { ChartPeriod } from "../api";
-import type { BoardMappingResponse, ChartResponse, MarketModuleSection, MarketQuote, ModuleDataResponse, ModuleDefinition, Security } from "../types";
+import type {
+  BoardMappingResponse,
+  ChartResponse,
+  DataRow,
+  MarketModuleSection,
+  MarketQuote,
+  ModuleDataResponse,
+  ModuleDefinition,
+  ReportModuleTableColumn,
+  Security
+} from "../types";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { KLineChart } from "./KLineChart";
@@ -86,6 +96,20 @@ function sourceStatusDetail(source: { status: string; last_success_at?: string |
     return source.last_failure_at ? `failure: ${formatPanelTime(source.last_failure_at)}` : null;
   }
   return null;
+}
+
+function renderReportCell(value: unknown, column: ReportModuleTableColumn, row: DataRow) {
+  if (column.key === "title" && typeof row.url === "string" && row.url) {
+    return (
+      <a className="table-title-link" href={row.url} target="_blank" rel="noreferrer">
+        {displayValue(value)}
+      </a>
+    );
+  }
+  if (column.key === "fetched_at") {
+    return formatPanelTime(value);
+  }
+  return displayValue(value);
 }
 
 export function ModuleView({
@@ -353,6 +377,135 @@ export function ModuleView({
             ))}
           </div>
         </section>
+      </div>
+    );
+  }
+
+  if (module.id === "reports") {
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">Research Reports Layer</span>
+              <h1>Search a symbol to inspect research reports</h1>
+              <p>Research Reports uses Eastmoney reportapi as the main source, with optional 10jqka EPS and iwencai capabilities shown explicitly.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol or Chinese name"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const reportsPayload = data?.reports;
+    const reportSections = reportsPayload?.sections ?? [];
+    const reportTables = reportsPayload?.tables ?? [];
+    const visibleTables = reportTables.filter((table) => table.rows.length > 0);
+
+    return (
+      <div className="content-grid module-reports-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Eastmoney reportapi company and industry reports, PDF URL metadata, optional consensus EPS and iwencai status.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol}</span>
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading research reports module data...</div>}
+        {error && <EmptyState title="Research reports request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {reportSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {visibleTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(reportsPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {reportSections.length === 0 && visibleTables.length === 0 && (
+              <EmptyState title="No research report payload" detail="The reports connector returned no structured sections or table rows for this symbol." />
+            )}
+          </>
+        )}
       </div>
     );
   }

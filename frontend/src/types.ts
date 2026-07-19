@@ -193,6 +193,7 @@ export interface ModuleDataResponse {
   status: FreshnessState | "not_found";
   rows: DataRow[];
   market?: MarketModuleData;
+  reports?: ReportsModuleData;
 }
 
 export interface MarketModuleSection {
@@ -229,6 +230,39 @@ export interface MarketModuleData {
   liquidity: MarketModuleSection;
   order_book: MarketModuleCapability;
   index_etf: MarketModuleCapability;
+  source_status: MarketSourceStatus[];
+}
+
+export interface ReportModuleCard {
+  label: string;
+  value: unknown;
+  status?: string | null;
+}
+
+export interface ReportModuleSection {
+  id: string;
+  title: string;
+  source?: string | null;
+  fetched_at?: string | null;
+  cards: ReportModuleCard[];
+}
+
+export interface ReportModuleTableColumn {
+  key: string;
+  label: string;
+}
+
+export interface ReportModuleTable {
+  id: string;
+  title: string;
+  rows: DataRow[];
+  columns: ReportModuleTableColumn[];
+}
+
+export interface ReportsModuleData {
+  symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
   source_status: MarketSourceStatus[];
 }
 

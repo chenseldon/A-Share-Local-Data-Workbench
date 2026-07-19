@@ -1222,8 +1222,41 @@ p {
   gap: 16px;
 }
 
+.module-reports-grid {
+  gap: 16px;
+}
+
 .module-market-start {
   min-height: calc(100vh - 32px);
+}
+
+.module-dark-hero {
+  border-color: rgba(216, 224, 232, 0.14);
+  background: #111820;
+  color: #eef4f7;
+  box-shadow: none;
+}
+
+.module-dark-hero h1,
+.module-dark-hero p {
+  color: inherit;
+}
+
+.module-dark-hero p {
+  color: #9fb0bd;
+}
+
+.module-dynamic-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.module-report-section .snapshot-grid > div {
+  min-width: 0;
+}
+
+.module-report-section .status-badge {
+  justify-self: start;
+  margin-top: 6px;
 }
 
 .workspace-chart-only .module-market-strip .market-placeholders span,
@@ -1619,13 +1652,17 @@ p {
 .status-fresh,
 .status-ok,
 .status-success,
-.status-configured {
+.status-configured,
+.status-wired {
   background: var(--success-soft);
   color: var(--success);
 }
 
 .status-stale,
-.status-prepared {
+.status-prepared,
+.status-planned,
+.status-needs-key,
+.status-optional-dependency-missing {
   background: var(--warning-soft);
   color: var(--warning);
 }

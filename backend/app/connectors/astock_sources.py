@@ -125,6 +125,43 @@ def eastmoney_reports(symbol: str, max_pages: int = 1, client: httpx.Client | No
     return rows
 
 
+def eastmoney_industry_reports(
+    industry_code: str = "*",
+    max_pages: int = 1,
+    client: httpx.Client | None = None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        params = {
+            "industryCode": industry_code or "*",
+            "pageSize": "50",
+            "industry": "*",
+            "rating": "*",
+            "ratingChange": "*",
+            "beginTime": "2000-01-01",
+            "endTime": "2030-01-01",
+            "pageNo": str(page),
+            "fields": "",
+            "qType": "1",
+            "orgCode": "",
+            "code": "",
+            "rcode": "",
+            "p": str(page),
+            "pageNum": str(page),
+            "pageNumber": str(page),
+        }
+        response = eastmoney_get(REPORT_API, params=params, headers={"Referer": "https://data.eastmoney.com/"}, timeout=30, client=client)
+        payload = response.json()
+        page_rows = payload.get("data") or []
+        if not isinstance(page_rows, list) or not page_rows:
+            break
+        rows.extend(page_rows)
+        total_pages = payload.get("TotalPage") or payload.get("totalPage") or 1
+        if page >= int(total_pages):
+            break
+    return rows
+
+
 def normalize_eastmoney_report(symbol: str, record: dict[str, Any], fetched_at: datetime) -> dict[str, Any]:
     info_code = str(record.get("infoCode") or record.get("info_code") or payload_hash(record)[:16])
     eps = {
@@ -146,6 +183,40 @@ def normalize_eastmoney_report(symbol: str, record: dict[str, Any], fetched_at: 
         "fetched_at": fetched_at,
         "raw_payload_hash": payload_hash(record),
     }
+
+
+def eastmoney_pdf_url(info_code: str) -> str:
+    return PDF_TPL.format(info_code=info_code)
+
+
+def normalize_eastmoney_industry_report(symbol: str | None, record: dict[str, Any], fetched_at: datetime) -> ModuleRecord:
+    normalized_symbol = normalize_symbol(symbol) if symbol else None
+    info_code = str(record.get("infoCode") or record.get("info_code") or payload_hash(record)[:16])
+    report_date = _to_date(record.get("publishDate")) or fetched_at.date().isoformat()
+    payload = {
+        "id": f"eastmoney-industry-report-{info_code}",
+        "symbol": normalized_symbol,
+        "title": str(record.get("title") or ""),
+        "industry": record.get("industryName") or record.get("industry"),
+        "industry_code": record.get("industryCode"),
+        "institution": record.get("orgSName") or record.get("orgName"),
+        "analyst": record.get("researcher"),
+        "rating": record.get("emRatingName") or record.get("rating"),
+        "report_type": record.get("reportType"),
+        "report_date": report_date,
+        "url": eastmoney_pdf_url(info_code),
+        "source": "eastmoney_industry_reports",
+    }
+    return ModuleRecord(
+        module="reports",
+        source="eastmoney_industry_reports",
+        data_key=info_code,
+        symbol=normalized_symbol,
+        record_date=report_date,
+        payload=payload,
+        fetched_at=fetched_at,
+        raw_payload_hash=payload_hash(record),
+    )
 
 
 def eastmoney_stock_info(symbol: str, client: httpx.Client | None = None) -> dict[str, Any]:
@@ -380,7 +451,7 @@ def cninfo_announcements(symbol: str, page_size: int = 30, client: httpx.Client 
                 "symbol": normalized,
                 "title": re.sub(r"<[^>]+>", "", str(item.get("announcementTitle") or "")),
                 "published_at": _cninfo_ts_to_date(item.get("announcementTime")) or datetime.now(UTC).date().isoformat(),
-                "url": f"https://www.cninfo.com.cn/new/disclosure/detail?annoId={announcement_id}",
+                "url": f"https://www.cninfo.com.cn/new/disclosure/detail?announcementId={announcement_id}",
                 "source": "cninfo_announcements",
                 "raw_payload_hash": payload_hash(item),
             }
