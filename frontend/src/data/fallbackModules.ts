@@ -50,11 +50,11 @@ export const fallbackModules: ModuleDefinition[] = [
     label: "News",
     layer: "新闻层",
     description: "Company news, CLS telegrams and global market context with mutually backed sources.",
-    status: "not_configured",
-    tables: [],
+    status: "configured",
+    tables: ["module_records"],
     sources: ["Eastmoney", "CLS"],
     planned_fields: ["company news", "CLS telegrams", "global information"],
-    capabilities: { planned: 3 }
+    capabilities: { wired: 3 }
   },
   {
     id: "fundamentals",

@@ -6,6 +6,7 @@
 
 - Market data: free-stockdb local K-line is the only wired chart source for daily bars. Tencent quote remains the latest quote/valuation source; Baidu/Tencent K-line fallbacks are disabled for charts. `mootdx` is tracked as an optional dependency.
 - Eastmoney: used for reportapi, stock profile, concept ownership and fund-flow endpoints. Calls go through a throttled helper.
+- News: Eastmoney stock news and global 7x24 news are used alongside CLS telegraphs as mutually backed read-only news context. CLS signing is calculated locally and does not require a key.
 - CNINFO: used for announcement search with dynamic `orgId` lookup and fallback rules.
 - Sina: used for financial-statement records through the open API endpoint.
 - iwencai: registered as `needs_key`; it is disabled unless `IWENCAI_API_KEY` is configured.
@@ -23,6 +24,9 @@
 | Signals | `dragon_tiger_board` | Writes current-symbol dragon-tiger records and latest buy/sell seat summaries into `module_records`. |
 | Signals | `industry_comparison` | Writes market-wide Eastmoney industry ranking rows into `module_records`, scoped to the current symbol context for module display. |
 | Signals | `free_stockdb_bk` | Updates Security View sector/concept mapping through the local free-stockdb `bk.get()` connector; displayed alongside Eastmoney block ownership. |
+| News | `eastmoney_stock_news` | Writes current-symbol Eastmoney JSONP stock news rows into `module_records`. |
+| News | `cls_telegraph` | Writes market-wide CLS telegraph rows into `module_records` using a local `md5(sha1(sorted query string))` signature. |
+| News | `eastmoney_global_news` | Writes market-wide Eastmoney 7x24 fast-news rows into `module_records` with `req_trace` request metadata. |
 | Chip/Liquidity | `margin_trading` | Writes Eastmoney margin financing and short-selling detail rows into `module_records`. |
 | Chip/Liquidity | `block_trade` | Writes Eastmoney block-trade rows with price, amount, buyer/seller and premium fields into `module_records`. |
 | Chip/Liquidity | `holder_num_change` | Writes shareholder count and average free-share rows into `module_records` for chip concentration inspection. |
@@ -37,6 +41,7 @@
 - `GET /api/connectors/capabilities` returns the full V3.4.0 function registry with `wired`, `planned`, `needs_key`, or `optional_dependency_missing`.
 - `POST /api/modules/{module}/refresh?symbol=600519.SH` triggers a module-specific read-only collection job.
 - `GET /api/modules/signals/data?symbol=600519.SH` returns both legacy `rows` and a structured `signals` payload with dynamic sections, tables, and source statuses.
+- `GET /api/modules/news/data?symbol=600519.SH` returns both legacy `rows` and a structured `news` payload with stock news, CLS telegraphs, global news and source statuses. Market-wide news remains visible inside a symbol-scoped News view.
 - `GET /api/modules/chip_liquidity/data?symbol=600519.SH` returns both legacy `rows` and a structured `chip_liquidity` payload with dynamic sections, tables, and source statuses.
 - `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
 
