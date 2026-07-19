@@ -91,10 +91,10 @@ MODULES: tuple[ModuleDefinition, ...] = (
         "Limit-Up Board",
         "打板层",
         "Limit-up, broken-board, down-limit, yesterday limit-up, theme reason and board-height structure.",
-        "prepared",
-        ("limit_up_pool",),
+        "configured",
+        ("module_records", "limit_up_pool legacy"),
         ("Eastmoney push2ex", "10jqka"),
-        ("limit-up pool", "broken board", "down-limit pool", "limit-up reason", "board height"),
+        ("limit-up pool", "broken-board pool", "limit-down pool", "yesterday limit-up", "limit-up reason", "board ladder"),
     ),
     ModuleDefinition(
         "etf_options",

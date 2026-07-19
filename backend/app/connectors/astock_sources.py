@@ -19,6 +19,7 @@ PDF_TPL = "https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf"
 EM_MIN_INTERVAL = 1.0
 _last_em_call = 0.0
 _cninfo_orgid_map: dict[str, str] = {}
+ZTB_UT = "7eea3edcaed734bea9cbfc24409ed989"
 
 
 class AStockSourceError(RuntimeError):
@@ -94,6 +95,37 @@ def _to_date(value: Any) -> str | None:
     if re.fullmatch(r"\d{8}", text):
         return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
     return text[:10]
+
+
+def _format_limit_time(value: Any) -> str | None:
+    if value in (None, "", "-", "--", 0, "0"):
+        return None
+    text = str(value).split(".")[0].zfill(6)
+    return f"{text[0:2]}:{text[2:4]}:{text[4:6]}"
+
+
+def _normalize_trade_date(value: str | None) -> str:
+    if not value:
+        return datetime.now(UTC).date().strftime("%Y%m%d")
+    text = value.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text.replace("-", "")
+    if re.fullmatch(r"\d{8}", text):
+        return text
+    raise AStockSourceError("Limit-up trade_date must use YYYYMMDD or YYYY-MM-DD.")
+
+
+def _record_date_from_yyyymmdd(value: str) -> str:
+    return f"{value[:4]}-{value[4:6]}-{value[6:8]}"
+
+
+def _limit_symbol(code: Any) -> str | None:
+    if code in (None, ""):
+        return None
+    try:
+        return normalize_symbol(str(code).zfill(6))
+    except ValueError:
+        return None
 
 
 def eastmoney_reports(symbol: str, max_pages: int = 1, client: httpx.Client | None = None) -> list[dict[str, Any]]:
@@ -334,6 +366,265 @@ def eastmoney_datacenter(
     if isinstance(rows, dict):
         rows = list(rows.values())
     return rows if isinstance(rows, list) else []
+
+
+def _em_limit_pool_api(endpoint: str, sort: str, trade_date: str, client: httpx.Client | None = None) -> list[dict[str, Any]]:
+    normalized_date = _normalize_trade_date(trade_date)
+    response = eastmoney_get(
+        f"https://push2ex.eastmoney.com/{endpoint}",
+        params={
+            "ut": ZTB_UT,
+            "dpt": "wz.ztzt",
+            "Pageindex": "0",
+            "pagesize": "10000",
+            "sort": sort,
+            "date": normalized_date,
+        },
+        headers={"Referer": "https://quote.eastmoney.com/"},
+        timeout=15,
+        client=client,
+    )
+    rows = (response.json().get("data") or {}).get("pool") or []
+    return rows if isinstance(rows, list) else []
+
+
+def _limit_record(
+    *,
+    source: str,
+    trade_date: str,
+    raw: dict[str, Any],
+    data_key_suffix: str = "",
+    payload: dict[str, Any],
+    fetched_at: datetime,
+) -> ModuleRecord | None:
+    code = raw.get("c") or raw.get("code") or payload.get("code")
+    symbol = _limit_symbol(code)
+    if not symbol:
+        return None
+    data_key = f"{trade_date}-{symbol}{data_key_suffix}"
+    payload = {"symbol": symbol, **payload, "source": source}
+    return ModuleRecord(
+        module="limit_up",
+        source=source,
+        data_key=data_key,
+        symbol=symbol,
+        record_date=_record_date_from_yyyymmdd(trade_date),
+        payload=payload,
+        fetched_at=fetched_at,
+        raw_payload_hash=payload_hash(raw),
+    )
+
+
+def em_zt_pool(trade_date: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized_date = _normalize_trade_date(trade_date)
+    fetched_at = datetime.now(UTC)
+    records: list[ModuleRecord] = []
+    for raw in _em_limit_pool_api("getTopicZTPool", "fbt:asc", normalized_date, client=client):
+        stat = raw.get("zttj") or {}
+        payload = {
+            "pool": "limit_up",
+            "code": raw.get("c"),
+            "name": raw.get("n"),
+            "price": _to_float(raw.get("p")) / 1000 if _to_float(raw.get("p")) is not None else None,
+            "pct": _to_float(raw.get("zdp")),
+            "amount": _to_float(raw.get("amount")),
+            "float_cap": _to_float(raw.get("ltsz")),
+            "turnover": _to_float(raw.get("hs")),
+            "limit_days": raw.get("lbc"),
+            "first_seal": _format_limit_time(raw.get("fbt")),
+            "last_seal": _format_limit_time(raw.get("lbt")),
+            "seal_fund": _to_float(raw.get("fund")),
+            "break_times": raw.get("zbc"),
+            "industry": raw.get("hybk") or "",
+            "zt_stat": f"{stat.get('days', '?')}天{stat.get('ct', '?')}板",
+        }
+        record = _limit_record(source="em_zt_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
+        if record:
+            records.append(record)
+    return records
+
+
+def em_zb_pool(trade_date: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized_date = _normalize_trade_date(trade_date)
+    fetched_at = datetime.now(UTC)
+    records: list[ModuleRecord] = []
+    for raw in _em_limit_pool_api("getTopicZBPool", "fbt:asc", normalized_date, client=client):
+        stat = raw.get("zttj") or {}
+        payload = {
+            "pool": "broken_board",
+            "code": raw.get("c"),
+            "name": raw.get("n"),
+            "price": _to_float(raw.get("p")) / 1000 if _to_float(raw.get("p")) is not None else None,
+            "limit_price": _to_float(raw.get("ztp")) / 1000 if _to_float(raw.get("ztp")) is not None else None,
+            "pct": _to_float(raw.get("zdp")),
+            "turnover": _to_float(raw.get("hs")),
+            "first_seal": _format_limit_time(raw.get("fbt")),
+            "break_times": raw.get("zbc"),
+            "amplitude": _to_float(raw.get("zf")),
+            "speed": _to_float(raw.get("zs")),
+            "industry": raw.get("hybk") or "",
+            "zt_stat": f"{stat.get('days', '?')}天{stat.get('ct', '?')}板",
+        }
+        record = _limit_record(source="em_zb_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
+        if record:
+            records.append(record)
+    return records
+
+
+def em_dt_pool(trade_date: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized_date = _normalize_trade_date(trade_date)
+    fetched_at = datetime.now(UTC)
+    records: list[ModuleRecord] = []
+    for raw in _em_limit_pool_api("getTopicDTPool", "fund:asc", normalized_date, client=client):
+        payload = {
+            "pool": "limit_down",
+            "code": raw.get("c"),
+            "name": raw.get("n"),
+            "price": _to_float(raw.get("p")) / 1000 if _to_float(raw.get("p")) is not None else None,
+            "pct": _to_float(raw.get("zdp")),
+            "turnover": _to_float(raw.get("hs")),
+            "pe": _to_float(raw.get("pe")),
+            "seal_fund": _to_float(raw.get("fund")),
+            "last_seal": _format_limit_time(raw.get("lbt")),
+            "board_amount": _to_float(raw.get("fba")),
+            "dt_days": raw.get("days"),
+            "open_times": raw.get("oc"),
+            "industry": raw.get("hybk") or "",
+        }
+        record = _limit_record(source="em_dt_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
+        if record:
+            records.append(record)
+    return records
+
+
+def em_yzt_pool(trade_date: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized_date = _normalize_trade_date(trade_date)
+    fetched_at = datetime.now(UTC)
+    records: list[ModuleRecord] = []
+    for raw in _em_limit_pool_api("getYesterdayZTPool", "zs:desc", normalized_date, client=client):
+        stat = raw.get("zttj") or {}
+        payload = {
+            "pool": "yesterday_limit_up",
+            "code": raw.get("c"),
+            "name": raw.get("n"),
+            "price": _to_float(raw.get("p")) / 1000 if _to_float(raw.get("p")) is not None else None,
+            "pct": _to_float(raw.get("zdp")),
+            "turnover": _to_float(raw.get("hs")),
+            "amplitude": _to_float(raw.get("zf")),
+            "speed": _to_float(raw.get("zs")),
+            "y_first_seal": _format_limit_time(raw.get("yfbt")),
+            "y_limit_days": raw.get("ylbc"),
+            "industry": raw.get("hybk") or "",
+            "zt_stat": f"{stat.get('days', '?')}天{stat.get('ct', '?')}板",
+        }
+        record = _limit_record(source="em_yzt_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
+        if record:
+            records.append(record)
+    return records
+
+
+def ths_limit_up_pool(trade_date: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized_date = _normalize_trade_date(trade_date)
+    fetched_at = datetime.now(UTC)
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=15)
+    try:
+        response = http_client.get(
+            "https://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool",
+            params={
+                "page": "1",
+                "limit": "200",
+                "field": "199112,10,9001,330323,330324,330325,9002,330329,133971,133970,1968584,3475914,9003,9004",
+                "filter": "HS,GEM2STAR",
+                "order_field": "330324",
+                "order_type": "0",
+                "date": normalized_date,
+            },
+            headers={"User-Agent": UA, "Referer": "https://data.10jqka.com.cn/"},
+            timeout=15,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise AStockSourceError(f"10jqka limit-up request failed: {exc}") from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+    info = ((response.json().get("data") or {}).get("info") or [])
+    rows = info if isinstance(info, list) else []
+    records: list[ModuleRecord] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        first_time = None
+        raw_first = raw.get("first_limit_up_time")
+        if raw_first not in (None, "", "-", "--"):
+            try:
+                first_time = datetime.fromtimestamp(int(raw_first)).strftime("%H:%M:%S")
+            except (TypeError, ValueError, OSError):
+                first_time = None
+        payload = {
+            "pool": "ths_limit_up_reason",
+            "code": raw.get("code"),
+            "name": raw.get("name"),
+            "price": _to_float(raw.get("latest")),
+            "pct": _to_float(raw.get("change_rate")),
+            "reason": raw.get("reason_type") or "",
+            "board_type": raw.get("limit_up_type") or "",
+            "seal_rate": _to_float(raw.get("limit_up_suc_rate")),
+            "break_times": raw.get("open_num") or 0,
+            "seal_amount": _to_float(raw.get("order_amount")),
+            "high_days": raw.get("high_days") or "",
+            "first_time": first_time,
+            "is_again": raw.get("is_again_limit"),
+        }
+        record = _limit_record(source="ths_limit_up_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
+        if record:
+            records.append(record)
+    return records
+
+
+def limit_up_sentiment(
+    trade_date: str,
+    limit_up_rows: list[ModuleRecord],
+    broken_rows: list[ModuleRecord],
+    down_rows: list[ModuleRecord],
+    yesterday_rows: list[ModuleRecord],
+) -> ModuleRecord:
+    normalized_date = _normalize_trade_date(trade_date)
+    ladder: dict[int, int] = {}
+    for record in limit_up_rows:
+        limit_days = record.payload.get("limit_days")
+        if isinstance(limit_days, int):
+            ladder[limit_days] = ladder.get(limit_days, 0) + 1
+    limit_count = len(limit_up_rows)
+    broken_count = len(broken_rows)
+    down_count = len(down_rows)
+    yesterday_count = len(yesterday_rows)
+    promoted_count = sum(1 for record in yesterday_rows if (_to_float(record.payload.get("pct")) or 0) >= 9.8)
+    payload = {
+        "date": _record_date_from_yyyymmdd(normalized_date),
+        "limit_up_count": limit_count,
+        "broken_board_count": broken_count,
+        "limit_down_count": down_count,
+        "yesterday_limit_up_count": yesterday_count,
+        "break_rate": round(broken_count / (limit_count + broken_count) * 100, 1) if (limit_count + broken_count) else 0,
+        "max_height": max(ladder.keys(), default=0),
+        "promotion_rate": round(promoted_count / yesterday_count * 100, 1) if yesterday_count else None,
+        "ladder": dict(sorted(ladder.items())),
+        "source": "limit_up_sentiment",
+    }
+    fetched_at = datetime.now(UTC)
+    return ModuleRecord(
+        module="limit_up",
+        source="limit_up_sentiment",
+        data_key=normalized_date,
+        symbol=None,
+        record_date=_record_date_from_yyyymmdd(normalized_date),
+        payload=payload,
+        fetched_at=fetched_at,
+        raw_payload_hash=payload_hash(payload),
+    )
 
 
 def eastmoney_fund_flow_minute(symbol: str, client: httpx.Client | None = None) -> list[ModuleRecord]:

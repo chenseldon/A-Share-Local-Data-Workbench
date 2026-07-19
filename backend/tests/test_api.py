@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.connectors import astock_sources
 from app.connectors.astock_sources import AStockSourceError, ModuleRecord
 from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
@@ -312,6 +313,227 @@ def test_signals_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
         assert data.status_code == 200
         source_status = data.json()["signals"]["source_status"]
         assert any(row["source"] == "eastmoney_fund_flow_minute" and row["status"] == "failed" for row in source_status)
+
+
+class _FakeJsonResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeHttpClient:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+
+    def get(self, *args, **kwargs) -> _FakeJsonResponse:
+        return _FakeJsonResponse(self.payload)
+
+
+def test_limit_up_connector_normalizes_eastmoney_pool(monkeypatch) -> None:
+    def fake_eastmoney_get(*args, **kwargs) -> _FakeJsonResponse:
+        return _FakeJsonResponse(
+            {
+                "data": {
+                    "pool": [
+                        {
+                            "c": "600519",
+                            "n": "Mock Stock",
+                            "p": 123450,
+                            "zdp": 10.01,
+                            "amount": 1000000,
+                            "ltsz": 2000000,
+                            "hs": 3.2,
+                            "lbc": 2,
+                            "fbt": 92500,
+                            "lbt": 145700,
+                            "fund": 300000000,
+                            "zbc": 1,
+                            "hybk": "Food",
+                            "zttj": {"days": 3, "ct": 2},
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr(astock_sources, "eastmoney_get", fake_eastmoney_get)
+    rows = astock_sources.em_zt_pool("20260715")
+    assert len(rows) == 1
+    assert rows[0].source == "em_zt_pool"
+    assert rows[0].symbol == "600519.SH"
+    assert rows[0].record_date == "2026-07-15"
+    assert rows[0].payload["price"] == 123.45
+    assert rows[0].payload["first_seal"] == "09:25:00"
+    assert rows[0].payload["last_seal"] == "14:57:00"
+    assert rows[0].payload["zt_stat"] == "3天2板"
+
+
+def test_limit_up_connector_normalizes_ths_timestamp() -> None:
+    rows = astock_sources.ths_limit_up_pool(
+        "20260715",
+        client=_FakeHttpClient(
+            {
+                "data": {
+                    "info": [
+                        {
+                            "code": "600519",
+                            "name": "Mock Stock",
+                            "latest": 123.45,
+                            "change_rate": 10.0,
+                            "reason_type": "AI concept",
+                            "limit_up_type": "换手板",
+                            "limit_up_suc_rate": 0.82,
+                            "open_num": 1,
+                            "order_amount": 123000000,
+                            "high_days": "3天2板",
+                            "first_limit_up_time": 1784097900,
+                            "is_again_limit": 1,
+                        }
+                    ]
+                }
+            }
+        ),
+    )
+    assert len(rows) == 1
+    assert rows[0].source == "ths_limit_up_pool"
+    assert rows[0].payload["reason"] == "AI concept"
+    assert rows[0].payload["board_type"] == "换手板"
+    assert rows[0].payload["first_time"]
+
+
+def test_limit_up_sentiment_metrics() -> None:
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def record(source: str, symbol: str, payload: dict[str, object]) -> ModuleRecord:
+        return ModuleRecord("limit_up", source, f"{source}-{symbol}", symbol, "2026-07-15", payload, fetched_at, "hash")
+
+    zt = [
+        record("em_zt_pool", "600001.SH", {"limit_days": 2}),
+        record("em_zt_pool", "600002.SH", {"limit_days": 3}),
+        record("em_zt_pool", "600003.SH", {"limit_days": 3}),
+    ]
+    zb = [record("em_zb_pool", "600004.SH", {})]
+    dt = [record("em_dt_pool", "600005.SH", {})]
+    yzt = [
+        record("em_yzt_pool", "600006.SH", {"pct": 10.0}),
+        record("em_yzt_pool", "600007.SH", {"pct": 2.0}),
+    ]
+    sentiment = astock_sources.limit_up_sentiment("20260715", zt, zb, dt, yzt)
+    assert sentiment.payload["limit_up_count"] == 3
+    assert sentiment.payload["broken_board_count"] == 1
+    assert sentiment.payload["break_rate"] == 25.0
+    assert sentiment.payload["max_height"] == 3
+    assert sentiment.payload["promotion_rate"] == 50.0
+    assert sentiment.payload["ladder"] == {2: 1, 3: 2}
+
+
+def test_limit_up_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "limit-up-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_module_records(
+        [
+            ModuleRecord(
+                "limit_up",
+                "em_zt_pool",
+                "20260715-600519.SH",
+                "600519.SH",
+                "2026-07-15",
+                {
+                    "symbol": "600519.SH",
+                    "pool": "limit_up",
+                    "name": "Mock Stock",
+                    "price": 123.45,
+                    "pct": 10.0,
+                    "industry": "Food",
+                    "limit_days": 2,
+                    "zt_stat": "3天2板",
+                    "source": "em_zt_pool",
+                },
+                fetched_at,
+                "hash-1",
+            ),
+            ModuleRecord(
+                "limit_up",
+                "limit_up_sentiment",
+                "20260715",
+                None,
+                "2026-07-15",
+                {
+                    "date": "2026-07-15",
+                    "limit_up_count": 1,
+                    "broken_board_count": 0,
+                    "limit_down_count": 0,
+                    "yesterday_limit_up_count": 0,
+                    "break_rate": 0,
+                    "max_height": 2,
+                    "promotion_rate": None,
+                    "ladder": {2: 1},
+                    "source": "limit_up_sentiment",
+                },
+                fetched_at,
+                "hash-2",
+            ),
+        ]
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/limit_up/data?symbol=600519.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["limit_up"]["sections"][0]["title"] == "Limit-Up Sentiment"
+        assert payload["limit_up"]["sections"][0]["cards"][0]["value"] == 1
+        assert payload["limit_up"]["selected_symbol_hits"][0]["symbol"] == "600519.SH"
+        assert payload["limit_up"]["tables"][0]["rows"][0]["name"] == "Mock Stock"
+        assert any(row["source"] == "ths_limit_up_pool" for row in payload["limit_up"]["source_status"])
+
+
+def test_limit_up_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "limit-up-refresh.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_zt(date: str) -> list[ModuleRecord]:
+        assert date == "20260715"
+        return [
+            ModuleRecord(
+                "limit_up",
+                "em_zt_pool",
+                "20260715-600519.SH",
+                "600519.SH",
+                "2026-07-15",
+                {"symbol": "600519.SH", "name": "Mock Stock", "limit_days": 2, "pct": 10.0, "source": "em_zt_pool"},
+                fetched_at,
+                "hash-1",
+            )
+        ]
+
+    monkeypatch.setattr("app.main.em_zt_pool", fake_zt)
+    monkeypatch.setattr("app.main.em_zb_pool", lambda date: (_ for _ in ()).throw(AStockSourceError("broken pool failed")))
+    monkeypatch.setattr("app.main.em_dt_pool", lambda date: [])
+    monkeypatch.setattr("app.main.em_yzt_pool", lambda date: [])
+    monkeypatch.setattr("app.main.ths_limit_up_pool", lambda date: [])
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/limit_up/refresh?trade_date=2026-07-15")
+        assert refresh.status_code == 200
+        payload = refresh.json()
+        assert payload["status"] == "fresh"
+        assert payload["trade_date"] == "20260715"
+        assert payload["optional_results"]["em_zt_pool"]["status"] == "fresh"
+        assert payload["optional_results"]["em_zb_pool"]["status"] == "failed"
+        assert payload["optional_results"]["limit_up_sentiment"]["status"] == "fresh"
+
+        data = client.get("/api/modules/limit_up/data")
+        assert data.status_code == 200
+        source_status = data.json()["limit_up"]["source_status"]
+        assert any(row["source"] == "em_zb_pool" and row["status"] == "failed" for row in source_status)
 
 
 def test_chip_liquidity_module_data_returns_structured_payload(tmp_path: Path) -> None:

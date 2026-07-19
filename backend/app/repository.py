@@ -745,6 +745,7 @@ class DataRepository:
         signals_payload = None
         news_payload = None
         chip_liquidity_payload = None
+        limit_up_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
             rows = ([quote] if quote else []) + self._list_market_bars(symbol, limit)
@@ -767,7 +768,8 @@ class DataRepository:
             rows = self._list_news_records(symbol, limit)
             news_payload = self._news_layer_payload(symbol, limit)
         elif module_id == "limit_up":
-            rows = self._list_limit_up(symbol, limit)
+            rows = self._list_module_records("limit_up", None, limit) + self._list_limit_up(symbol, limit)
+            limit_up_payload = self._limit_up_layer_payload(symbol, limit)
         elif module_id in {"etf_options", "sentiment"}:
             rows = self._list_module_records(module_id, symbol, limit)
         else:
@@ -786,7 +788,231 @@ class DataRepository:
             result["news"] = news_payload
         if chip_liquidity_payload is not None:
             result["chip_liquidity"] = chip_liquidity_payload
+        if limit_up_payload is not None:
+            result["limit_up"] = limit_up_payload
         return result
+
+    def _limit_up_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        rows = self._list_module_records_by_sources(
+            "limit_up",
+            [
+                "em_zt_pool",
+                "em_zb_pool",
+                "em_dt_pool",
+                "em_yzt_pool",
+                "ths_limit_up_pool",
+                "limit_up_sentiment",
+            ],
+            limit,
+        )
+        limit_rows = [row for row in rows if row.get("source") == "em_zt_pool"]
+        broken_rows = [row for row in rows if row.get("source") == "em_zb_pool"]
+        down_rows = [row for row in rows if row.get("source") == "em_dt_pool"]
+        yesterday_rows = [row for row in rows if row.get("source") == "em_yzt_pool"]
+        ths_rows = [row for row in rows if row.get("source") == "ths_limit_up_pool"]
+        sentiment_rows = [row for row in rows if row.get("source") == "limit_up_sentiment"]
+        sentiment = sentiment_rows[0] if sentiment_rows else {}
+        selected = symbol.upper() if symbol else None
+        selected_hits = [row for row in rows if selected and str(row.get("symbol", "")).upper() == selected]
+        latest_time = _latest_fetched_at(rows)
+        source_status = self._limit_up_source_status()
+        ladder = sentiment.get("ladder") if isinstance(sentiment.get("ladder"), dict) else {}
+        ladder_rows = [
+            {
+                "height": height,
+                "count": count,
+                "source": "limit_up_sentiment",
+                "record_date": sentiment.get("record_date") or sentiment.get("date"),
+                "fetched_at": sentiment.get("fetched_at"),
+            }
+            for height, count in sorted(ladder.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else 0)
+        ]
+        sections = [
+            {
+                "id": "sentiment",
+                "title": "Limit-Up Sentiment",
+                "source": "Eastmoney push2ex four pools",
+                "fetched_at": sentiment.get("fetched_at") or latest_time,
+                "cards": [
+                    {"label": "Limit-up", "value": sentiment.get("limit_up_count", len(limit_rows))},
+                    {"label": "Broken-board", "value": sentiment.get("broken_board_count", len(broken_rows))},
+                    {"label": "Limit-down", "value": sentiment.get("limit_down_count", len(down_rows))},
+                    {"label": "Break rate", "value": sentiment.get("break_rate")},
+                    {"label": "Max height", "value": sentiment.get("max_height")},
+                    {"label": "Promotion rate", "value": sentiment.get("promotion_rate")},
+                ],
+            },
+            {
+                "id": "pool_coverage",
+                "title": "Pool Coverage",
+                "source": "Eastmoney push2ex + 10jqka",
+                "fetched_at": latest_time,
+                "cards": [
+                    {"label": "Yesterday limit-up", "value": len(yesterday_rows)},
+                    {"label": "THS insights", "value": len(ths_rows)},
+                    {"label": "Selected symbol hits", "value": len(selected_hits)},
+                    _source_capability_card(source_status, "em_zt_pool", "EM limit-up"),
+                    _source_capability_card(source_status, "ths_limit_up_pool", "10jqka insight"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "em_zt_pool", "Limit-up pool"),
+                    _source_capability_card(source_status, "em_zb_pool", "Broken-board pool"),
+                    _source_capability_card(source_status, "em_dt_pool", "Limit-down pool"),
+                    _source_capability_card(source_status, "em_yzt_pool", "Yesterday limit-up"),
+                    _source_capability_card(source_status, "ths_limit_up_pool", "THS reason"),
+                    _source_capability_card(source_status, "limit_up_sentiment", "Sentiment"),
+                ],
+            },
+        ]
+        common_columns = [
+            {"key": "symbol", "label": "Symbol"},
+            {"key": "name", "label": "Name"},
+            {"key": "price", "label": "Price"},
+            {"key": "pct", "label": "Change %"},
+            {"key": "industry", "label": "Industry"},
+            {"key": "zt_stat", "label": "N-day boards"},
+            {"key": "limit_days", "label": "Boards"},
+            {"key": "seal_fund", "label": "Seal fund"},
+            {"key": "break_times", "label": "Breaks"},
+            {"key": "first_seal", "label": "First seal"},
+            {"key": "last_seal", "label": "Last seal"},
+            {"key": "source", "label": "Source"},
+            {"key": "fetched_at", "label": "Fetched at"},
+        ]
+        tables = [
+            {"id": "limit_up_pool", "title": "Eastmoney Limit-Up Pool", "rows": limit_rows, "columns": common_columns},
+            {
+                "id": "broken_board_pool",
+                "title": "Eastmoney Broken-Board Pool",
+                "rows": broken_rows,
+                "columns": [
+                    {"key": "symbol", "label": "Symbol"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "price", "label": "Price"},
+                    {"key": "limit_price", "label": "Limit price"},
+                    {"key": "pct", "label": "Change %"},
+                    {"key": "amplitude", "label": "Amplitude"},
+                    {"key": "speed", "label": "Speed"},
+                    {"key": "break_times", "label": "Breaks"},
+                    {"key": "industry", "label": "Industry"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "limit_down_pool",
+                "title": "Eastmoney Limit-Down Pool",
+                "rows": down_rows,
+                "columns": [
+                    {"key": "symbol", "label": "Symbol"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "price", "label": "Price"},
+                    {"key": "pct", "label": "Change %"},
+                    {"key": "turnover", "label": "Turnover"},
+                    {"key": "seal_fund", "label": "Seal fund"},
+                    {"key": "dt_days", "label": "Down days"},
+                    {"key": "open_times", "label": "Open times"},
+                    {"key": "industry", "label": "Industry"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "yesterday_limit_up_pool",
+                "title": "Eastmoney Yesterday Limit-Up Pool",
+                "rows": yesterday_rows,
+                "columns": [
+                    {"key": "symbol", "label": "Symbol"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "price", "label": "Price"},
+                    {"key": "pct", "label": "Change %"},
+                    {"key": "amplitude", "label": "Amplitude"},
+                    {"key": "speed", "label": "Speed"},
+                    {"key": "y_limit_days", "label": "Yesterday boards"},
+                    {"key": "industry", "label": "Industry"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "ths_limit_up_pool",
+                "title": "10jqka Limit-Up Insight",
+                "rows": ths_rows,
+                "columns": [
+                    {"key": "symbol", "label": "Symbol"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "price", "label": "Price"},
+                    {"key": "pct", "label": "Change %"},
+                    {"key": "reason", "label": "Reason"},
+                    {"key": "board_type", "label": "Board type"},
+                    {"key": "seal_rate", "label": "Seal success"},
+                    {"key": "seal_amount", "label": "Seal amount"},
+                    {"key": "break_times", "label": "Breaks"},
+                    {"key": "first_time", "label": "First time"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "board_ladder",
+                "title": "Consecutive Board Ladder",
+                "rows": ladder_rows,
+                "columns": [
+                    {"key": "height", "label": "Board height"},
+                    {"key": "count", "label": "Count"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "record_date", "label": "Record date"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+        ]
+        return {
+            "symbol": selected,
+            "trade_date": sentiment.get("date") or (rows[0].get("record_date") if rows else None),
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+            "selected_symbol_hits": selected_hits,
+        }
+
+    def _limit_up_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'limit_up'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "em_zt_pool": {"status": "not_collected", "last_error": None},
+            "em_zb_pool": {"status": "not_collected", "last_error": None},
+            "em_dt_pool": {"status": "not_collected", "last_error": None},
+            "em_yzt_pool": {"status": "not_collected", "last_error": None},
+            "ths_limit_up_pool": {"status": "not_collected", "last_error": "Public 10jqka endpoint may drift or throttle; shown only when refreshed successfully."},
+            "limit_up_sentiment": {"status": "not_collected", "last_error": None},
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "limit_up",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
 
     def _news_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         news_rows = self._list_news_records(symbol, limit)
@@ -1700,6 +1926,23 @@ class DataRepository:
                 LIMIT ?
                 """,
                 (module_id, limit),
+            )
+        return [_flatten_module_record(row) for row in rows]
+
+    def _list_module_records_by_sources(self, module_id: str, sources: list[str], limit_per_source: int) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for source in sources:
+            rows.extend(
+                self._fetch_all(
+                    """
+                    SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                    FROM module_records
+                    WHERE module = ? AND source = ?
+                    ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                    LIMIT ?
+                    """,
+                    (module_id, source, limit_per_source),
+                )
             )
         return [_flatten_module_record(row) for row in rows]
 

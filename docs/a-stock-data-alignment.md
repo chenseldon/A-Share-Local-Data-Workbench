@@ -37,6 +37,12 @@
 | Announcements | `cninfo_announcements` | Writes CNINFO announcement titles, timestamps and detail URLs into `announcements`, using dynamic `orgId` lookup with fallback rules. |
 | Announcements | `mootdx_f10_latest` | Tracked as an optional F10 latest-announcement summary capability; not enabled unless `mootdx` is installed and configured. |
 | Announcements | `announcements_backup` | Registered as a prepared backup route from `a-stock-data`: SZSE official announcements for Shenzhen tickers and Eastmoney announcement PDFs for Shanghai tickers. |
+| Limit-Up Board | `em_zt_pool` | Writes Eastmoney push2ex limit-up pool rows into `module_records`; price fields are normalized from source integer prices. |
+| Limit-Up Board | `em_zb_pool` | Writes Eastmoney push2ex broken-board pool rows into `module_records` with break counts, first/last seal time and board metrics. |
+| Limit-Up Board | `em_dt_pool` | Writes Eastmoney push2ex limit-down pool rows into `module_records`. |
+| Limit-Up Board | `em_yzt_pool` | Writes Eastmoney push2ex yesterday limit-up pool rows into `module_records` for promotion-rate context. |
+| Limit-Up Board | `ths_limit_up_pool` | Writes best-effort 10jqka limit-up insight rows into `module_records`; public response shape can drift or throttle. |
+| Limit-Up Board | `limit_up_sentiment` | Computes limit-up count, broken-board rate, limit-down count, highest board height, ladder and promotion rate from cached pool rows. |
 
 ## API Surface
 
@@ -46,8 +52,12 @@
 - `GET /api/modules/news/data?symbol=600519.SH` returns both legacy `rows` and a structured `news` payload with stock news, CLS telegraphs, global news and source statuses. Market-wide news remains visible inside a symbol-scoped News view.
 - `GET /api/modules/chip_liquidity/data?symbol=600519.SH` returns both legacy `rows` and a structured `chip_liquidity` payload with dynamic sections, tables, and source statuses.
 - `GET /api/modules/announcements/data?symbol=600519.SH` returns both legacy `rows` and a structured `announcements` payload with CNINFO sections, announcement tables, optional mootdx F10 status and backup-route status.
+- `POST /api/modules/limit_up/refresh?trade_date=20260720` triggers market-wide Limit-Up Board collection. `trade_date` accepts `YYYYMMDD` or `YYYY-MM-DD`; missing dates default to the current Asia/Shanghai date.
+- `GET /api/modules/limit_up/data?symbol=600519.SH` returns both legacy `rows` and a structured `limit_up` payload with sentiment sections, pool tables, source statuses, trade date and selected-symbol hits.
 - `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
 
 ## Safety
 
 All external responses are cached in DuckDB before the UI reads them. The workbench does not connect to broker accounts, does not route orders, and does not treat public-source refreshes as trading-grade real-time feeds.
+
+Limit-Up Board data uses public Eastmoney push2ex and 10jqka endpoints. These endpoints can be throttled, blocked, or change fields without notice; failures are recorded per source in `source_health`. The V1 Limit-Up implementation does not provide an independent backup source, and the old `limit_up_pool` table is retained only for legacy compatibility rather than as the primary model.
