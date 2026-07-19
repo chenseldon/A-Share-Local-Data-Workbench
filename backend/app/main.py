@@ -24,6 +24,7 @@ from .connectors.astock_sources import (
     eastmoney_stock_info,
     holder_num_change,
     margin_trading,
+    normalize_eastmoney_stock_profile,
     normalize_eastmoney_industry_report,
     normalize_eastmoney_report,
     sina_etf_option_records,
@@ -364,10 +365,13 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
         fetched_at = datetime.now(UTC)
         info = eastmoney_stock_info(symbol)
         records_written = repository.save_eastmoney_stock_info(symbol, info, fetched_at)
+        records_written += repository.save_module_records([normalize_eastmoney_stock_profile(symbol, info, fetched_at)])
         statement_records = []
         for report_type in ("lrb", "fzb", "llb"):
             try:
-                statement_records.extend(sina_financial_report(symbol, report_type=report_type, num=4))
+                records = sina_financial_report(symbol, report_type=report_type, num=4)
+                repository.record_source_success("fundamentals", f"sina_financial_report:{report_type}", len(records))
+                statement_records.extend(records)
             except AStockSourceError as exc:
                 repository.record_source_failure("fundamentals", f"sina_financial_report:{report_type}", str(exc))
         records_written += repository.save_module_records(statement_records)

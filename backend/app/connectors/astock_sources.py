@@ -482,6 +482,33 @@ def eastmoney_stock_info(symbol: str, client: httpx.Client | None = None) -> dic
     }
 
 
+def normalize_eastmoney_stock_profile(symbol: str, info: dict[str, Any], fetched_at: datetime) -> ModuleRecord:
+    normalized = normalize_symbol(symbol)
+    payload = {
+        "symbol": normalized,
+        "code": info.get("code") or six_digit_code(normalized),
+        "name": info.get("name") or normalized,
+        "industry": info.get("industry"),
+        "list_date": info.get("list_date"),
+        "total_shares": info.get("total_shares"),
+        "float_shares": info.get("float_shares"),
+        "total_market_cap": info.get("mcap"),
+        "float_market_cap": info.get("float_mcap"),
+        "price": info.get("price"),
+        "data_source": "eastmoney_stock_info",
+    }
+    return ModuleRecord(
+        module="fundamentals",
+        source="eastmoney_stock_profile",
+        data_key=normalized,
+        symbol=normalized,
+        record_date=payload["list_date"] or fetched_at.date().isoformat(),
+        payload=payload,
+        fetched_at=fetched_at,
+        raw_payload_hash=payload_hash(info),
+    )
+
+
 def eastmoney_concept_blocks(symbol: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
     normalized = normalize_symbol(symbol)
     code, exchange = normalized.split(".")
@@ -1008,19 +1035,53 @@ def sina_financial_report(symbol: str, report_type: str = "lrb", num: int = 8, c
 
     result = payload.get("result") or {}
     data = result.get("data") or {}
-    records = data.get("report_list") or data.get("list") or data.get("data") or []
+    return _normalize_sina_financial_reports(normalized, report_type, data, fetched_at)
+
+
+def _normalize_sina_financial_reports(
+    normalized_symbol: str,
+    report_type: str,
+    data: dict[str, Any],
+    fetched_at: datetime,
+) -> list[ModuleRecord]:
+    report_list = data.get("report_list")
     rows: list[ModuleRecord] = []
-    for index, record in enumerate(records):
+    if isinstance(report_list, dict):
+        periods = list(report_list.items())[:8]
+        for index, (period, period_payload) in enumerate(periods):
+            if not isinstance(period_payload, dict):
+                continue
+            items = period_payload.get("data") or []
+            report_date = _to_date(period)
+            row_payload = _sina_statement_payload(normalized_symbol, report_type, report_date, items)
+            rows.append(
+                ModuleRecord(
+                    module="fundamentals",
+                    source="sina_financial_report",
+                    data_key=f"{report_type}-{report_date or index}",
+                    symbol=normalized_symbol,
+                    record_date=report_date,
+                    payload=row_payload,
+                    fetched_at=fetched_at,
+                    raw_payload_hash=payload_hash(row_payload),
+                )
+            )
+        return rows
+
+    records = report_list or data.get("list") or data.get("data") or []
+    if isinstance(records, dict):
+        records = list(records.values())
+    for index, record in enumerate(records if isinstance(records, list) else []):
         if not isinstance(record, dict):
             continue
-        report_date = _to_date(record.get("report_date") or record.get("date") or record.get("报告期"))
-        row_payload = {"symbol": normalized, "statement_type": report_type, **record}
+        report_date = _to_date(record.get("report_date") or record.get("date") or record.get("reportDate"))
+        row_payload = {"symbol": normalized_symbol, "statement_type": report_type, "report_period": report_date, **record}
         rows.append(
             ModuleRecord(
                 module="fundamentals",
                 source="sina_financial_report",
                 data_key=f"{report_type}-{report_date or index}",
-                symbol=normalized,
+                symbol=normalized_symbol,
                 record_date=report_date,
                 payload=row_payload,
                 fetched_at=fetched_at,
@@ -1028,6 +1089,44 @@ def sina_financial_report(symbol: str, report_type: str = "lrb", num: int = 8, c
             )
         )
     return rows
+
+
+def _sina_statement_payload(symbol: str, statement_type: str, report_date: str | None, items: Any) -> dict[str, Any]:
+    item_map: dict[str, Any] = {}
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("item_title") or item.get("title") or item.get("name") or "").strip()
+            if not title:
+                continue
+            item_map[title] = item.get("item_value") or item.get("value")
+            yoy = item.get("yoy") or item.get("同比") or item.get("item_yoy")
+            if yoy not in (None, ""):
+                item_map[f"{title}_yoy"] = yoy
+    return {
+        "symbol": symbol,
+        "statement_type": statement_type,
+        "report_period": report_date,
+        "revenue": _pick_statement_item(item_map, ("营业总收入", "营业收入")),
+        "net_profit": _pick_statement_item(item_map, ("归属于母公司所有者的净利润", "净利润")),
+        "eps": _pick_statement_item(item_map, ("基本每股收益", "每股收益")),
+        "total_assets": _pick_statement_item(item_map, ("资产总计",)),
+        "total_liabilities": _pick_statement_item(item_map, ("负债合计",)),
+        "shareholder_equity": _pick_statement_item(item_map, ("所有者权益", "股东权益")),
+        "operating_cash_flow": _pick_statement_item(item_map, ("经营活动产生的现金流量净额",)),
+        "cash_change": _pick_statement_item(item_map, ("现金及现金等价物净增加额",)),
+        "items": item_map,
+        "source": "sina_financial_report",
+    }
+
+
+def _pick_statement_item(item_map: dict[str, Any], candidates: tuple[str, ...]) -> Any:
+    for candidate in candidates:
+        for key, value in item_map.items():
+            if candidate in key:
+                return value
+    return None
 
 
 def _cninfo_ts_to_date(value: Any) -> str | None:
