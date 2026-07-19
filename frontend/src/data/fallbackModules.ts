@@ -21,18 +21,18 @@ export const fallbackModules: ModuleDefinition[] = [
     tables: ["reports"],
     sources: ["Eastmoney reportapi", "10jqka", "iwencai optional"],
     planned_fields: ["company reports", "industry reports", "ratings", "EPS forecast", "PDF URL"],
-    capabilities: { wired: 1, planned: 2, needs_key: 1, optional_dependency_missing: 1 }
+    capabilities: { wired: 2, prepared: 1, needs_key: 1, optional_dependency_missing: 1 }
   },
   {
     id: "signals",
     label: "Signals",
     layer: "信号层",
     description: "Strong stocks, theme attribution, northbound flow, sector ownership, ranking and event-driven signals.",
-    status: "prepared",
+    status: "configured",
     tables: ["module_records"],
-    sources: ["10jqka", "Eastmoney"],
-    planned_fields: ["strong stocks", "themes", "northbound flow", "sector mapping", "dragon tiger list"],
-    capabilities: { wired: 1, planned: 7 }
+    sources: ["Eastmoney", "free-stockdb", "10jqka planned", "HKEX boundary"],
+    planned_fields: ["sector mapping", "minute fund flow", "dragon tiger list", "industry ranking", "northbound boundary"],
+    capabilities: { wired: 5, prepared: 1, planned: 1 }
   },
   {
     id: "chip_liquidity",
@@ -40,10 +40,10 @@ export const fallbackModules: ModuleDefinition[] = [
     layer: "资金面 / 筹码层",
     description: "Margin financing, block trades, shareholder counts, dividends and multi-horizon money flow.",
     status: "configured",
-    tables: ["money_flow"],
+    tables: ["money_flow", "module_records"],
     sources: ["Eastmoney datacenter", "Eastmoney push2"],
     planned_fields: ["margin financing", "block trades", "shareholder counts", "dividends", "120-day money flow"],
-    capabilities: { wired: 1, planned: 4 }
+    capabilities: { wired: 5, prepared: 1 }
   },
   {
     id: "news",
@@ -65,7 +65,7 @@ export const fallbackModules: ModuleDefinition[] = [
     tables: ["fundamentals", "module_records"],
     sources: ["mootdx optional", "Eastmoney", "Sina"],
     planned_fields: ["37 quarterly fields", "F10 categories", "balance sheet", "income statement", "cash flow"],
-    capabilities: { wired: 2, optional_dependency_missing: 1 }
+    capabilities: { wired: 4, optional_dependency_missing: 1 }
   },
   {
     id: "announcements",
@@ -74,9 +74,9 @@ export const fallbackModules: ModuleDefinition[] = [
     description: "SSE, SZSE and BSE announcements with CNINFO search and PDF links where available.",
     status: "configured",
     tables: ["announcements"],
-    sources: ["CNINFO", "mootdx optional"],
-    planned_fields: ["announcement title", "published time", "PDF URL", "exchange scope"],
-    capabilities: { wired: 1, optional_dependency_missing: 1 }
+    sources: ["CNINFO", "mootdx optional", "SZSE/Eastmoney backup prepared"],
+    planned_fields: ["announcement title", "published time", "detail URL", "backup route status"],
+    capabilities: { wired: 1, prepared: 2, optional_dependency_missing: 1 }
   },
   {
     id: "limit_up",
@@ -105,10 +105,10 @@ export const fallbackModules: ModuleDefinition[] = [
     label: "Sentiment",
     layer: "舆情互动层",
     description: "Investor Q&A, hot rankings, popularity rankings and concept matches.",
-    status: "not_configured",
-    tables: [],
+    status: "configured",
+    tables: ["module_records"],
     sources: ["CNINFO Hudongyi", "10jqka", "Eastmoney"],
     planned_fields: ["interactive Q&A", "10jqka hot ranking", "Eastmoney popularity", "concept hit"],
-    capabilities: { planned: 4 }
+    capabilities: { wired: 4 }
   }
 ];

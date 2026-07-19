@@ -14,7 +14,10 @@ from .connectors.astock_sources import (
     AStockSourceError,
     block_trade,
     cninfo_announcements,
+    cninfo_irm,
     dividend_history,
+    em_hot_concept,
+    em_hot_rank,
     eastmoney_concept_blocks,
     eastmoney_dragon_tiger_board,
     eastmoney_fund_flow_minute,
@@ -28,6 +31,7 @@ from .connectors.astock_sources import (
     normalize_eastmoney_report,
     sina_financial_report,
     stock_fund_flow_120d,
+    ths_hot_list,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
 from .connectors.news_sources import cls_telegraph, eastmoney_global_news, eastmoney_stock_news
@@ -340,7 +344,7 @@ app = create_app()
 
 def _refresh_core_modules(repository: DataRepository, symbol: str) -> dict[str, object]:
     results: dict[str, object] = {}
-    for module_id in ("fundamentals", "reports", "announcements", "signals", "chip_liquidity"):
+    for module_id in ("fundamentals", "reports", "announcements", "signals", "chip_liquidity", "sentiment"):
         try:
             results[module_id] = _refresh_module(repository, module_id, symbol)
         except (AStockSourceError, MarketDataError, ValueError) as exc:
@@ -520,6 +524,37 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             "optional_results": optional_results,
         }
 
+    if module_id == "sentiment":
+        if not symbol:
+            raise ValueError("Sentiment refresh requires a symbol.")
+        records_written = 0
+        optional_results: dict[str, object] = {}
+        fetchers = (
+            ("cninfo_irm", lambda: cninfo_irm(symbol)),
+            ("ths_hot_list", lambda: ths_hot_list(period="hour", top=50)),
+            ("em_hot_rank", lambda: em_hot_rank(top=50)),
+            ("em_hot_concept", lambda: em_hot_concept(symbol)),
+        )
+        for source, fetcher in fetchers:
+            try:
+                records = fetcher()
+                written = repository.save_module_records(records)
+                if not records:
+                    repository.record_source_success("sentiment", source, 0)
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+            except (AStockSourceError, ValueError) as exc:
+                repository.record_source_failure("sentiment", source, str(exc))
+                optional_results[source] = {"status": "failed", "error": str(exc)}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {
+            "module": module_id,
+            "symbol": symbol,
+            "status": status,
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
+
     return {"module": module_id, "symbol": symbol, "status": "not_configured", "records_written": 0}
 
 
@@ -532,6 +567,7 @@ def _default_source_for_module(module_id: str) -> str:
         "signals": "eastmoney_concept_blocks",
         "news": "eastmoney_stock_news",
         "chip_liquidity": "stock_fund_flow_120d",
+        "sentiment": "cninfo_irm",
     }.get(module_id, "not_configured")
 
 

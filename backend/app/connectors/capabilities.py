@@ -71,10 +71,10 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("etf_options", "sina_option_codes", "Sina hq.sinajs", "ETF option contract list.", "planned"),
     ConnectorCapability("etf_options", "sina_option_tquote", "Sina hq.sinajs", "ETF option T-quote.", "planned"),
     ConnectorCapability("etf_options", "sina_option_greeks", "Sina hq.sinajs", "Greeks and implied volatility.", "planned"),
-    ConnectorCapability("sentiment", "cninfo_irm", "CNINFO Hudongyi", "Investor Q&A.", "planned"),
-    ConnectorCapability("sentiment", "ths_hot_list", "10jqka", "10jqka hot ranking.", "planned"),
-    ConnectorCapability("sentiment", "em_hot_rank", "Eastmoney appdata", "Eastmoney popularity ranking.", "planned"),
-    ConnectorCapability("sentiment", "em_hot_concept", "Eastmoney appdata", "Hot concept hits for a stock.", "planned"),
+    ConnectorCapability("sentiment", "cninfo_irm", "CNINFO Hudongyi", "Investor Q&A.", "wired", note="Latest questions may not have company replies yet."),
+    ConnectorCapability("sentiment", "ths_hot_list", "10jqka", "10jqka hot ranking.", "wired", note="Public endpoint can be rate-limited or change fields."),
+    ConnectorCapability("sentiment", "em_hot_rank", "Eastmoney appdata", "Eastmoney popularity ranking.", "wired", note="Popularity rank is a public appdata feed, not a trading signal."),
+    ConnectorCapability("sentiment", "em_hot_concept", "Eastmoney appdata", "Hot concept hits for a stock.", "wired", note="Stock concept hits are cached per selected symbol."),
 )
 
 

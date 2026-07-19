@@ -36,7 +36,7 @@ import type {
 } from "./types";
 
 type ActiveView = "security" | "module" | "system";
-const backgroundRefreshModules = ["fundamentals", "announcements", "reports", "signals", "chip_liquidity", "news"];
+const backgroundRefreshModules = ["fundamentals", "announcements", "reports", "signals", "chip_liquidity", "news", "sentiment"];
 const universeReadyCount = 7400;
 
 interface UpdateProgress {
@@ -359,7 +359,7 @@ export default function App() {
       .finally(() => setModuleRefreshing(false));
   }
 
-  const darkModuleActive = activeView === "module" && ["market", "reports", "signals", "chip_liquidity", "news", "announcements"].includes(activeModule);
+  const darkModuleActive = activeView === "module" && ["market", "reports", "signals", "chip_liquidity", "news", "announcements", "sentiment"].includes(activeModule);
   const darkWorkspaceActive = activeView === "security" || darkModuleActive;
 
   return (

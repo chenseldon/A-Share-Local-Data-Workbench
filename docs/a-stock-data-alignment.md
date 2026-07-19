@@ -37,6 +37,10 @@
 | Announcements | `cninfo_announcements` | Writes CNINFO announcement titles, timestamps and detail URLs into `announcements`, using dynamic `orgId` lookup with fallback rules. |
 | Announcements | `mootdx_f10_latest` | Tracked as an optional F10 latest-announcement summary capability; not enabled unless `mootdx` is installed and configured. |
 | Announcements | `announcements_backup` | Registered as a prepared backup route from `a-stock-data`: SZSE official announcements for Shenzhen tickers and Eastmoney announcement PDFs for Shanghai tickers. |
+| Sentiment | `cninfo_irm` | Writes CNINFO Hudongyi investor Q&A rows into `module_records`; unanswered questions are represented as `answered=false`, not as connector failures. |
+| Sentiment | `ths_hot_list` | Writes 10jqka market-wide hot-list rows into `module_records` with rank, heat, concept tags and rank change. |
+| Sentiment | `em_hot_rank` | Writes Eastmoney market-wide popularity ranking rows into `module_records`; quote details are enriched through Eastmoney `ulist.np`. |
+| Sentiment | `em_hot_concept` | Writes current-symbol Eastmoney concept-hit rows into `module_records`, using SH/SZ/BJ-prefixed source codes. |
 
 ## API Surface
 
@@ -46,7 +50,8 @@
 - `GET /api/modules/news/data?symbol=600519.SH` returns both legacy `rows` and a structured `news` payload with stock news, CLS telegraphs, global news and source statuses. Market-wide news remains visible inside a symbol-scoped News view.
 - `GET /api/modules/chip_liquidity/data?symbol=600519.SH` returns both legacy `rows` and a structured `chip_liquidity` payload with dynamic sections, tables, and source statuses.
 - `GET /api/modules/announcements/data?symbol=600519.SH` returns both legacy `rows` and a structured `announcements` payload with CNINFO sections, announcement tables, optional mootdx F10 status and backup-route status.
-- `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
+- `GET /api/modules/sentiment/data?symbol=600519.SH` returns both legacy `rows` and a structured `sentiment` payload with investor Q&A, hot-list, popularity-rank, concept-hit and source-status sections.
+- `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals, chip/liquidity and sentiment; non-market failures are recorded in `source_health` and returned in `module_results`.
 
 ## Safety
 

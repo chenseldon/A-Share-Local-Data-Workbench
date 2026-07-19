@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
-from app.connectors.astock_sources import AStockSourceError, ModuleRecord
+from app.connectors.astock_sources import AStockSourceError, ModuleRecord, cninfo_irm, em_hot_concept, em_hot_rank, ths_hot_list
 from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
 from app.demo_data import seed_demo_data
@@ -312,6 +313,212 @@ def test_signals_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
         assert data.status_code == 200
         source_status = data.json()["signals"]["source_status"]
         assert any(row["source"] == "eastmoney_fund_flow_minute" and row["status"] == "failed" for row in source_status)
+
+
+def test_cninfo_irm_uses_query_params_and_keeps_unanswered_state() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/queryKeyboardInfo"):
+            return httpx.Response(200, json=[{"secid": "gssh0600519"}])
+        if request.url.path.endswith("/company/question"):
+            assert request.url.params["stockcode"] == "600519"
+            assert request.url.params["orgId"] == "gssh0600519"
+            assert request.url.params["pageSize"] == "30"
+            return httpx.Response(
+                200,
+                json={
+                    "rows": [
+                        {
+                            "id": "q1",
+                            "stockCode": "600519",
+                            "companyShortName": "Mock Corp",
+                            "mainContent": "<p>Question?</p>",
+                            "attachedContent": "",
+                            "attachedAuthor": "",
+                            "pubDate": 1784080800000,
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = cninfo_irm("600519.SH", client=client)
+    assert len(requests) == 2
+    assert records[0].source == "cninfo_irm"
+    assert records[0].payload["question"] == "Question?"
+    assert records[0].payload["answered"] is False
+
+
+def test_ths_hot_list_parses_period_concepts_and_rank_change() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["type"] == "day"
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "stock_list": [
+                        {
+                            "order": 1,
+                            "code": "600519",
+                            "name": "Mock Corp",
+                            "rate": 99.5,
+                            "rise_and_fall": 1.23,
+                            "hot_rank_chg": -2,
+                            "tag": {"concept_tag": ["AI", "消费"], "popularity_tag": "hot"},
+                        }
+                    ]
+                }
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = ths_hot_list(period="day", client=client)
+    assert records[0].symbol == "600519.SH"
+    assert records[0].payload["period"] == "day"
+    assert records[0].payload["concepts"] == "AI, 消费"
+    assert records[0].payload["rank_change"] == -2.0
+
+
+def test_eastmoney_hot_rank_handles_diff_dict() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"data": [{"rk": 1, "sc": "SH600519", "hisRc": 3}]})
+        assert request.url.path.endswith("/api/qt/ulist.np/get")
+        return httpx.Response(200, json={"data": {"diff": {"0": {"f12": "600519", "f14": "Mock Corp", "f2": 1688.0, "f3": 2.5}}}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = em_hot_rank(client=client)
+    assert records[0].symbol == "600519.SH"
+    assert records[0].payload["name"] == "Mock Corp"
+    assert records[0].payload["price"] == 1688.0
+    assert records[0].payload["rank_change"] == 3.0
+
+
+def test_eastmoney_hot_concept_uses_exchange_prefix() -> None:
+    seen_payloads: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payloads.append(request.content)
+        return httpx.Response(200, json={"data": [{"conceptName": "AI应用", "conceptId": "BK123", "hitCount": 12}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = em_hot_concept("600519.SH", client=client)
+    assert b"SH600519" in seen_payloads[0]
+    assert records[0].symbol == "600519.SH"
+    assert records[0].payload["concept"] == "AI应用"
+    assert records[0].payload["heat"] == 12.0
+
+
+def test_sentiment_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "sentiment-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_module_records(
+        [
+            ModuleRecord(
+                module="sentiment",
+                source="cninfo_irm",
+                data_key="q1",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "question": "Mock question",
+                    "answer": None,
+                    "answerer": None,
+                    "asked_at": "2026-07-15 10:00:00",
+                    "answered": False,
+                    "source": "cninfo_irm",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="sentiment-hash-1",
+            ),
+            ModuleRecord(
+                module="sentiment",
+                source="ths_hot_list",
+                data_key="hour-600519",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={"rank": 3, "symbol": "600519.SH", "code": "600519", "name": "Mock Corp", "heat": 88.0, "concepts": "消费", "source": "ths_hot_list"},
+                fetched_at=fetched_at,
+                raw_payload_hash="sentiment-hash-2",
+            ),
+            ModuleRecord(
+                module="sentiment",
+                source="em_hot_rank",
+                data_key="600519",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={"rank": 4, "symbol": "600519.SH", "code": "600519", "name": "Mock Corp", "price": 1688.0, "change_pct": 2.5, "source": "em_hot_rank"},
+                fetched_at=fetched_at,
+                raw_payload_hash="sentiment-hash-3",
+            ),
+            ModuleRecord(
+                module="sentiment",
+                source="em_hot_concept",
+                data_key="BK123",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={"symbol": "600519.SH", "concept": "AI应用", "bk": "BK123", "heat": 12.0, "source": "em_hot_concept"},
+                fetched_at=fetched_at,
+                raw_payload_hash="sentiment-hash-4",
+            ),
+        ]
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/sentiment/data?symbol=600519.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["sentiment"]["sections"][0]["title"] == "Investor Q&A Snapshot"
+        assert payload["sentiment"]["sections"][0]["cards"][2]["value"] == 1
+        assert payload["sentiment"]["tables"][0]["rows"][0]["answered"] is False
+        assert payload["sentiment"]["tables"][2]["rows"][0]["price"] == 1688.0
+        assert any(row["source"] == "em_hot_concept" and row["status"] == "fresh" for row in payload["sentiment"]["source_status"])
+
+
+def test_sentiment_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "sentiment-refresh.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_irm(symbol: str) -> list[ModuleRecord]:
+        assert symbol == "600519.SH"
+        return [
+            ModuleRecord(
+                module="sentiment",
+                source="cninfo_irm",
+                data_key="q1",
+                symbol=symbol,
+                record_date="2026-07-15",
+                payload={"symbol": symbol, "question": "Mock question", "answered": False, "source": "cninfo_irm"},
+                fetched_at=fetched_at,
+                raw_payload_hash="sentiment-hash-1",
+            )
+        ]
+
+    monkeypatch.setattr("app.main.cninfo_irm", fake_irm)
+    monkeypatch.setattr("app.main.ths_hot_list", lambda period="hour", top=50: (_ for _ in ()).throw(AStockSourceError("ths failed")))
+    monkeypatch.setattr("app.main.em_hot_rank", lambda top=50: [])
+    monkeypatch.setattr("app.main.em_hot_concept", lambda symbol: [])
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/sentiment/refresh?symbol=600519.SH")
+        assert refresh.status_code == 200
+        payload = refresh.json()
+        assert payload["status"] == "fresh"
+        assert payload["records_written"] == 1
+        assert payload["optional_results"]["cninfo_irm"]["status"] == "fresh"
+        assert payload["optional_results"]["ths_hot_list"]["status"] == "failed"
+
+        data = client.get("/api/modules/sentiment/data?symbol=600519.SH")
+        assert data.status_code == 200
+        source_status = data.json()["sentiment"]["source_status"]
+        assert any(row["source"] == "ths_hot_list" and row["status"] == "failed" for row in source_status)
 
 
 def test_chip_liquidity_module_data_returns_structured_payload(tmp_path: Path) -> None:

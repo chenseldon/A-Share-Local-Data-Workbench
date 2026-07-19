@@ -73,6 +73,35 @@ def eastmoney_get(
             http_client.close()
 
 
+def eastmoney_post_json(
+    url: str,
+    *,
+    json_payload: dict[str, Any],
+    headers: dict[str, str] | None = None,
+    timeout: float = 15.0,
+    client: httpx.Client | None = None,
+) -> httpx.Response:
+    global _last_em_call
+    if client is None:
+        elapsed = time.monotonic() - _last_em_call
+        if elapsed < EM_MIN_INTERVAL:
+            time.sleep(EM_MIN_INTERVAL - elapsed)
+
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=timeout)
+    try:
+        response = http_client.post(url, json=json_payload, headers={"User-Agent": UA, **(headers or {})}, timeout=timeout)
+        response.raise_for_status()
+        return response
+    except httpx.HTTPError as exc:
+        raise AStockSourceError(f"Eastmoney request failed: {exc}") from exc
+    finally:
+        if client is None:
+            _last_em_call = time.monotonic()
+        if owns_client:
+            http_client.close()
+
+
 def _to_float(value: Any) -> float | None:
     if value in (None, "", "-", "--"):
         return None
@@ -80,6 +109,11 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _to_int(value: Any) -> int | None:
+    number = _to_float(value)
+    return int(number) if number is not None else None
 
 
 def _to_wan(value: Any) -> float | None:
@@ -880,3 +914,314 @@ def cninfo_announcements(symbol: str, page_size: int = 30, client: httpx.Client 
             }
         )
     return rows
+
+
+def cninfo_irm(symbol: str, page_size: int = 30, page_num: int = 1, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code = normalized.split(".")[0]
+    fetched_at = datetime.now(UTC)
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=15, headers={"User-Agent": UA})
+    try:
+        keyboard_response = http_client.post(
+            "https://irm.cninfo.com.cn/newircs/index/queryKeyboardInfo",
+            data={"keyWord": code},
+            headers={"Referer": "https://irm.cninfo.com.cn/", "Origin": "https://irm.cninfo.com.cn"},
+        )
+        keyboard_response.raise_for_status()
+        keyboard_payload = keyboard_response.json()
+        candidates = keyboard_payload if isinstance(keyboard_payload, list) else keyboard_payload.get("data") or []
+        if not candidates:
+            return []
+        org_id = str((candidates[0] or {}).get("secid") or "")
+        if not org_id:
+            return []
+        question_response = http_client.post(
+            "https://irm.cninfo.com.cn/newircs/company/question",
+            params={
+                "_t": "1",
+                "stockcode": code,
+                "orgId": org_id,
+                "pageSize": str(page_size),
+                "pageNum": str(page_num),
+                "keyWord": "",
+                "startDay": "",
+                "endDay": "",
+            },
+            headers={"Referer": "https://irm.cninfo.com.cn/", "Origin": "https://irm.cninfo.com.cn"},
+        )
+        question_response.raise_for_status()
+        payload = question_response.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise AStockSourceError(f"CNINFO IRM request failed: {exc}") from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+    rows = payload.get("rows") or payload.get("data") or []
+    records: list[ModuleRecord] = []
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            continue
+        asked_at = _cninfo_ts_to_datetime(item.get("pubDate") or item.get("questionTime") or item.get("createTime"))
+        answer = item.get("attachedContent") or item.get("answerContent") or item.get("replyContent")
+        record_payload = {
+            "symbol": normalized,
+            "code": item.get("stockCode") or code,
+            "name": item.get("companyShortName") or item.get("shortName"),
+            "question": _clean_text(item.get("mainContent") or item.get("questionContent")),
+            "answer": _clean_text(answer),
+            "answerer": item.get("attachedAuthor") or item.get("replyAuthor") or item.get("answerer"),
+            "asked_at": asked_at,
+            "answered": bool(answer),
+            "source": "cninfo_irm",
+        }
+        records.append(
+            ModuleRecord(
+                module="sentiment",
+                source="cninfo_irm",
+                data_key=str(item.get("id") or item.get("questionId") or f"{code}-{asked_at or index}"),
+                symbol=normalized,
+                record_date=_to_date(asked_at) or fetched_at.date().isoformat(),
+                payload=record_payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(item),
+            )
+        )
+    return records
+
+
+def ths_hot_list(period: str = "hour", top: int = 50, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    if period not in {"hour", "day"}:
+        raise ValueError("10jqka hot list period must be 'hour' or 'day'.")
+    fetched_at = datetime.now(UTC)
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=15, headers={"User-Agent": UA})
+    try:
+        response = http_client.get(
+            "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/stock",
+            params={"stock_type": "a", "type": period, "list_type": "normal"},
+            headers={"Referer": "https://dq.10jqka.com.cn/", "Origin": "https://dq.10jqka.com.cn"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise AStockSourceError(f"10jqka hot list request failed: {exc}") from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+    stock_list = (payload.get("data") or {}).get("stock_list") or []
+    records: list[ModuleRecord] = []
+    for index, item in enumerate(stock_list[:top]):
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "")
+        symbol_value = _normalize_code_or_none(code)
+        tag = item.get("tag") if isinstance(item.get("tag"), dict) else {}
+        concepts = tag.get("concept_tag") if isinstance(tag, dict) else None
+        record_payload = {
+            "rank": _to_int(item.get("order")) or index + 1,
+            "symbol": symbol_value,
+            "code": code,
+            "name": item.get("name"),
+            "heat": _to_float(item.get("rate")),
+            "change_pct": _to_float(item.get("rise_and_fall")),
+            "rank_change": _to_float(item.get("hot_rank_chg")),
+            "concepts": _join_tags(concepts),
+            "popularity_tag": tag.get("popularity_tag") if isinstance(tag, dict) else None,
+            "period": period,
+            "scope": "market_wide",
+            "source": "ths_hot_list",
+        }
+        records.append(
+            ModuleRecord(
+                module="sentiment",
+                source="ths_hot_list",
+                data_key=f"{period}-{code or index}",
+                symbol=symbol_value,
+                record_date=fetched_at.date().isoformat(),
+                payload=record_payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(item),
+            )
+        )
+    return records
+
+
+def em_hot_rank(top: int = 50, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    fetched_at = datetime.now(UTC)
+    body = {**_em_hot_body(), "marketType": "", "pageNo": 1, "pageSize": top}
+    response = eastmoney_post_json(
+        "https://emappdata.eastmoney.com/stockrank/getAllCurrentList",
+        json_payload=body,
+        headers={"Referer": "https://emappdata.eastmoney.com/"},
+        timeout=15,
+        client=client,
+    )
+    payload = response.json()
+    rows = payload.get("data") or []
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    details = _em_hot_rank_details(rows, client=client)
+    records: list[ModuleRecord] = []
+    for index, item in enumerate(rows[:top]):
+        if not isinstance(item, dict):
+            continue
+        prefixed = str(item.get("sc") or item.get("securityCode") or "")
+        code = prefixed[-6:] if len(prefixed) >= 6 else prefixed
+        symbol_value = _normalize_prefixed_code(prefixed) or _normalize_code_or_none(code)
+        detail = details.get(code) or {}
+        record_payload = {
+            "rank": _to_int(item.get("rk")) or index + 1,
+            "symbol": symbol_value,
+            "code": code,
+            "name": detail.get("name") or item.get("name"),
+            "price": detail.get("price"),
+            "change_pct": detail.get("change_pct"),
+            "rank_change": _to_float(item.get("hisRc") or item.get("rankChange")),
+            "scope": "market_wide",
+            "source": "em_hot_rank",
+        }
+        records.append(
+            ModuleRecord(
+                module="sentiment",
+                source="em_hot_rank",
+                data_key=code or str(index),
+                symbol=symbol_value,
+                record_date=fetched_at.date().isoformat(),
+                payload=record_payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(item),
+            )
+        )
+    return records
+
+
+def em_hot_concept(symbol: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code, exchange = normalized.split(".")
+    fetched_at = datetime.now(UTC)
+    prefixed = f"{exchange}{code}"
+    response = eastmoney_post_json(
+        "https://emappdata.eastmoney.com/stockrank/getHotStockRankList",
+        json_payload={**_em_hot_body(), "srcSecurityCode": prefixed},
+        headers={"Referer": "https://emappdata.eastmoney.com/"},
+        timeout=15,
+        client=client,
+    )
+    payload = response.json()
+    rows = payload.get("data") or []
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    records: list[ModuleRecord] = []
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            continue
+        concept_name = item.get("conceptName") or item.get("name")
+        concept_id = item.get("conceptId") or item.get("bk") or item.get("code")
+        record_payload = {
+            "symbol": normalized,
+            "concept": concept_name,
+            "bk": concept_id,
+            "heat": _to_float(item.get("hitCount") or item.get("heat") or item.get("count")),
+            "source": "em_hot_concept",
+        }
+        records.append(
+            ModuleRecord(
+                module="sentiment",
+                source="em_hot_concept",
+                data_key=str(concept_id or concept_name or index),
+                symbol=normalized,
+                record_date=fetched_at.date().isoformat(),
+                payload=record_payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(item),
+            )
+        )
+    return records
+
+
+def _em_hot_rank_details(rows: list[Any], client: httpx.Client | None = None) -> dict[str, dict[str, Any]]:
+    secids: list[str] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        prefixed = str(item.get("sc") or "")
+        code = prefixed[-6:] if len(prefixed) >= 6 else prefixed
+        market = "1" if prefixed.startswith("SH") or code.startswith("6") else "0"
+        if code:
+            secids.append(f"{market}.{code}")
+    if not secids:
+        return {}
+    response = eastmoney_get(
+        "https://push2.eastmoney.com/api/qt/ulist.np/get",
+        params={
+            "ut": "f057cbcbce2a86e2866ab8877db1d059",
+            "fltt": "2",
+            "invt": "2",
+            "fields": "f14,f3,f12,f2",
+            "secids": ",".join(secids),
+        },
+        headers={"Referer": "https://quote.eastmoney.com/"},
+        timeout=15,
+        client=client,
+    )
+    diff = (response.json().get("data") or {}).get("diff") or []
+    items = list(diff.values()) if isinstance(diff, dict) else diff
+    details: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("f12") or "")
+        details[code] = {
+            "name": item.get("f14"),
+            "price": _to_float(item.get("f2")),
+            "change_pct": _to_float(item.get("f3")),
+        }
+    return details
+
+
+def _em_hot_body() -> dict[str, str]:
+    return {"appId": "appId01", "globalId": "786e4c21-70dc-435a-93bb-38"}
+
+
+def _normalize_prefixed_code(value: str) -> str | None:
+    if len(value) < 8:
+        return None
+    prefix = value[:2].upper()
+    code = value[-6:]
+    if prefix in {"SH", "SZ", "BJ"}:
+        return f"{code}.{prefix}"
+    return _normalize_code_or_none(code)
+
+
+def _normalize_code_or_none(code: str) -> str | None:
+    if not re.fullmatch(r"\d{6}", str(code)):
+        return None
+    try:
+        return normalize_symbol(str(code))
+    except ValueError:
+        return None
+
+
+def _join_tags(value: Any) -> str | None:
+    if value in (None, "", "-", "--"):
+        return None
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value if item not in (None, ""))
+    return str(value)
+
+
+def _clean_text(value: Any) -> str | None:
+    if value in (None, "", "-", "--"):
+        return None
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", str(value))).strip()
+
+
+def _cninfo_ts_to_datetime(value: Any) -> str | None:
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+    if value in (None, "", "-", "--"):
+        return None
+    return str(value)[:19]
