@@ -70,7 +70,7 @@ def eastmoney_get(
     owns_client = client is None
     http_client = client or httpx.Client(timeout=timeout)
     try:
-        response = http_client.get(url, params=params, headers={"User-Agent": UA, **(headers or {})}, timeout=timeout)
+        response = http_client.get(url, params=params, headers={"User-Agent": UA, **(headers or {})}, timeout=timeout, follow_redirects=True)
         response.raise_for_status()
         return response
     except httpx.HTTPError as exc:
@@ -98,7 +98,7 @@ def eastmoney_post_json(
     owns_client = client is None
     http_client = client or httpx.Client(timeout=timeout)
     try:
-        response = http_client.post(url, json=json_payload, headers={"User-Agent": UA, **(headers or {})}, timeout=timeout)
+        response = http_client.post(url, json=json_payload, headers={"User-Agent": UA, **(headers or {})}, timeout=timeout, follow_redirects=True)
         response.raise_for_status()
         return response
     except httpx.HTTPError as exc:
@@ -173,7 +173,7 @@ def _sina_option_get(
     url: str,
     *,
     params: dict[str, Any] | None = None,
-    timeout: float = 12.0,
+    timeout: float = 3.0,
     client: httpx.Client | None = None,
 ) -> httpx.Response:
     owns_client = client is None
@@ -210,6 +210,7 @@ def option_underlying_code(symbol: str | None = None) -> str:
 def sina_option_codes(
     underlying: str = "510050",
     call: bool = True,
+    max_months: int | None = None,
     client: httpx.Client | None = None,
 ) -> dict[str, list[str]]:
     code = option_underlying_code(underlying)
@@ -232,7 +233,8 @@ def sina_option_codes(
             months.append(text)
     flag = "OP_UP_" if call else "OP_DOWN_"
     contracts: dict[str, list[str]] = {}
-    for month in months:
+    selected_months = months[:max_months] if max_months is not None else months
+    for month in selected_months:
         codes = [
             item.replace("CON_OP_", "")
             for item in _sina_option_list(f"{flag}{code}{month}", client=client)
@@ -298,7 +300,8 @@ def sina_option_greeks(code: str, client: httpx.Client | None = None) -> dict[st
 def sina_etf_option_records(
     symbol: str | None = None,
     *,
-    max_contracts_per_side: int = 40,
+    max_contracts_per_side: int = 1,
+    detail_failure_limit: int = 2,
     client: httpx.Client | None = None,
 ) -> list[ModuleRecord]:
     underlying = option_underlying_code(symbol)
@@ -307,7 +310,7 @@ def sina_etf_option_records(
     records: list[ModuleRecord] = []
     contract_maps: dict[str, dict[str, list[str]]] = {}
     for side, is_call in (("call", True), ("put", False)):
-        contracts = sina_option_codes(underlying, call=is_call, client=client)
+        contracts = sina_option_codes(underlying, call=is_call, max_months=1, client=client)
         contract_maps[side] = contracts
         for month, codes in contracts.items():
             for index, contract_code in enumerate(codes):
@@ -342,6 +345,7 @@ def sina_etf_option_records(
         for contract_code in contracts[near_month][:max_contracts_per_side]:
             near_codes.append((side, near_month, contract_code))
 
+    detail_failures = 0
     for side, month, contract_code in near_codes:
         try:
             quote = {
@@ -365,6 +369,9 @@ def sina_etf_option_records(
                 )
             )
         except AStockSourceError:
+            detail_failures += 1
+            if detail_failures >= detail_failure_limit:
+                break
             continue
         try:
             greeks = {
@@ -388,6 +395,9 @@ def sina_etf_option_records(
                 )
             )
         except AStockSourceError:
+            detail_failures += 1
+            if detail_failures >= detail_failure_limit:
+                break
             continue
     return records
 

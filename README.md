@@ -81,7 +81,7 @@ The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stoc
 
 ## Local free-stockdb
 
-Daily K-line data is read from local `free-stockdb` when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is installed in the backend Python environment. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Tencent remains a latest quote and valuation source; K-line chart rows do not fall back to Tencent/Baidu example data.
+Daily K-line data is read from local `free-stockdb` when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is available to the backend Python environment. Set `ASHARE_FREE_STOCKDB_SDK_PATH` to the `pybao` directory containing `stock_sdk.py` and `zhibiao.py`; the Windows default is `D:\Edge\free-stockdb-main\pybao`. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Tencent remains a latest quote and valuation source; K-line chart rows do not fall back to Tencent/Baidu example data.
 
 The chart indicator library uses the local `zhibiao.zb.get()` SDK on demand. MA is enabled by default; MACD, KDJ, RSI and BOLL are only requested after the user enables them in the chart menu. `NaN` and infinite SDK values are returned as JSON `null`.
 

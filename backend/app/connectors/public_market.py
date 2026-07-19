@@ -12,6 +12,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from ..free_stockdb_sdk import configure_free_stockdb_sdk_path
+
+
+configure_free_stockdb_sdk_path()
+
 
 class MarketDataError(RuntimeError):
     pass

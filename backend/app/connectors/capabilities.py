@@ -5,6 +5,8 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
+from ..free_stockdb_sdk import configure_free_stockdb_sdk_path
+
 
 @dataclass(frozen=True)
 class ConnectorCapability:
@@ -83,6 +85,12 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("sentiment", "em_hot_rank", "Eastmoney appdata", "Eastmoney popularity ranking.", "wired"),
     ConnectorCapability("sentiment", "em_hot_concept", "Eastmoney appdata", "Hot concept hits for a stock.", "wired"),
 )
+_FREE_STOCKDB_REQUIREMENTS = {
+    "free_stockdb_kline": {"stock_sdk": "stock_sdk_available"},
+    "free_stockdb_security": {"stock_sdk": "stock_sdk_available"},
+    "free_stockdb_zb": {"zhibiao": "zhibiao_available"},
+    "free_stockdb_bk": {"zhibiao": "zhibiao_available"},
+}
 
 
 def list_capabilities() -> list[dict[str, object]]:
@@ -91,11 +99,23 @@ def list_capabilities() -> list[dict[str, object]]:
     for capability in _CAPABILITIES:
         item = asdict(capability)
         status = capability.status
+        note = capability.note
         if capability.optional_dependency and importlib.util.find_spec(capability.optional_dependency) is not None:
             status = "planned"
         if capability.requires_key and os.getenv(str(capability.note or "")):
             status = "planned"
+        requirements = _FREE_STOCKDB_REQUIREMENTS.get(capability.function)
+        if requirements:
+            sdk_status = configure_free_stockdb_sdk_path()
+            missing = [name for name, field in requirements.items() if not getattr(sdk_status, field)]
+            if missing:
+                status = "sdk_missing"
+                note = (
+                    f"Missing {', '.join(missing)}. {sdk_status.error} "
+                    f"Current path: {sdk_status.configured_path or 'not configured'}."
+                )
         item["status"] = status
+        item["note"] = note
         item["checked_at"] = now
         capabilities.append(item)
     return capabilities

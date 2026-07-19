@@ -450,6 +450,19 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             except AStockSourceError as exc:
                 repository.record_source_failure("signals", source, str(exc))
                 optional_results[source] = {"status": "failed", "error": str(exc)}
+        try:
+            boards = fetch_free_stockdb_board_mapping(symbol)
+            repository.update_security_sector(
+                symbol,
+                boards.sw_l1[0] if boards.sw_l1 else None,
+                boards.source,
+                boards.fetched_at,
+            )
+            repository.record_source_success("signals", boards.source, 1)
+            optional_results[boards.source] = {"status": "fresh", "records_written": 1}
+        except MarketDataError as exc:
+            repository.record_source_failure("signals", "free_stockdb_bk", str(exc))
+            optional_results["free_stockdb_bk"] = {"status": "failed", "error": str(exc)}
         status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
         return {
             "module": module_id,
@@ -611,7 +624,25 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
 
     if module_id == "etf_options":
         option_symbol = symbol or "510050.SH"
-        records = sina_etf_option_records(option_symbol)
+        try:
+            records = sina_etf_option_records(option_symbol)
+        except AStockSourceError as exc:
+            message = str(exc)
+            repository.record_source_failure("etf_options", "sina_option_codes", message)
+            skipped_message = "Skipped because Sina option contract list failed."
+            for source in ("sina_option_tquote", "sina_option_greeks"):
+                repository.record_source_failure("etf_options", source, skipped_message)
+            return {
+                "module": module_id,
+                "symbol": option_symbol,
+                "status": "failed",
+                "records_written": 0,
+                "optional_results": {
+                    "sina_option_codes": {"status": "failed", "records_written": 0, "error": message},
+                    "sina_option_tquote": {"status": "failed", "records_written": 0, "error": skipped_message},
+                    "sina_option_greeks": {"status": "failed", "records_written": 0, "error": skipped_message},
+                },
+            }
         records_written = repository.save_module_records(records)
         if not records:
             repository.record_source_success("etf_options", "sina_option_codes", 0)

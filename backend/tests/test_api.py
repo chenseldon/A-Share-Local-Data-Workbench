@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.connectors import astock_sources
 from app.connectors.astock_sources import AStockSourceError, ModuleRecord
-from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
+from app.connectors.public_market import BoardMapping, MarketBar, MarketDataError, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
 from app.demo_data import seed_demo_data
 from app.main import _merge_indicator_rows, create_app
@@ -430,6 +430,28 @@ def test_etf_options_refresh_uses_connector_and_cache(tmp_path: Path, monkeypatc
         assert data.json()["etf_options"]["tables"][0]["rows"][0]["contract_code"] == "10005001"
 
 
+def test_etf_options_refresh_records_source_failure_without_http_error(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "etf-options-refresh-failed.duckdb"
+
+    def fail_records(symbol: str | None = None) -> list[ModuleRecord]:
+        assert symbol == "510050.SH"
+        raise AStockSourceError("Sina option request failed")
+
+    monkeypatch.setattr("app.main.sina_etf_option_records", fail_records)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/etf_options/refresh?symbol=510050.SH")
+        assert refresh.status_code == 200
+        payload = refresh.json()
+        assert payload["status"] == "failed"
+        assert payload["records_written"] == 0
+        assert payload["optional_results"]["sina_option_codes"]["status"] == "failed"
+
+        data = client.get("/api/modules/etf_options/data?symbol=510050.SH")
+        source_status = data.json()["etf_options"]["source_status"]
+        assert any(row["source"] == "sina_option_codes" and row["status"] == "failed" for row in source_status)
+
+
 def test_signals_module_data_returns_structured_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "signals-payload.duckdb"
     fetched_at = datetime(2026, 7, 15, 10, 30, 0)
@@ -528,6 +550,7 @@ def test_signals_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("app.main.eastmoney_fund_flow_minute", lambda symbol: (_ for _ in ()).throw(AStockSourceError("minute flow failed")))
     monkeypatch.setattr("app.main.eastmoney_dragon_tiger_board", lambda symbol: [])
     monkeypatch.setattr("app.main.eastmoney_industry_comparison", lambda symbol: [])
+    monkeypatch.setattr("app.main.fetch_free_stockdb_board_mapping", lambda symbol: (_ for _ in ()).throw(MarketDataError("board mapping unavailable")))
     app = create_app(db_path)
     with TestClient(app) as client:
         refresh = client.post("/api/modules/signals/refresh?symbol=600519.SH")

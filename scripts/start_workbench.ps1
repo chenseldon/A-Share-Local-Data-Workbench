@@ -11,6 +11,10 @@ $FrontendRoot = Join-Path $ProjectRoot "frontend"
 $BackendPort = 8000
 $FrontendPort = 5173
 $DemoDataEnabled = if ($DemoData) { "1" } else { "0" }
+$DefaultFreeStockdbSdkPath = "D:\Edge\free-stockdb-main\pybao"
+if (-not $env:ASHARE_FREE_STOCKDB_SDK_PATH) {
+    $env:ASHARE_FREE_STOCKDB_SDK_PATH = $DefaultFreeStockdbSdkPath
+}
 
 function Test-CommandAvailable {
     param([string]$CommandName)
@@ -53,7 +57,14 @@ function Test-HttpHealth {
 }
 
 function Assert-BackendDependencies {
-    python -c "import duckdb, fastapi, uvicorn" | Out-Null
+    python -c "import os, sys; p=os.environ.get('ASHARE_FREE_STOCKDB_SDK_PATH'); sys.path.insert(0, p) if p and p not in sys.path else None; import duckdb, fastapi, uvicorn, stock_sdk, zhibiao" | Out-Null
+}
+
+function Assert-FreeStockdbSdkPath {
+    $sdkPath = $env:ASHARE_FREE_STOCKDB_SDK_PATH
+    if (-not (Test-Path (Join-Path $sdkPath "stock_sdk.py")) -or -not (Test-Path (Join-Path $sdkPath "zhibiao.py"))) {
+        throw "free-stockdb Python SDK is not available. Set ASHARE_FREE_STOCKDB_SDK_PATH to the pybao directory containing stock_sdk.py and zhibiao.py. Current value: $sdkPath"
+    }
 }
 
 Write-Host "A-Share Local Data Workbench" -ForegroundColor Cyan
@@ -68,10 +79,11 @@ if (-not (Test-CommandAvailable "npm.cmd")) {
 }
 
 try {
+    Assert-FreeStockdbSdkPath
     Assert-BackendDependencies
 }
 catch {
-    throw "Missing Python backend dependencies. Install them first, for example: python -m pip install duckdb fastapi httpx pydantic `"uvicorn[standard]`""
+    throw "Missing Python backend dependencies or free-stockdb SDK path. $($_.Exception.Message)"
 }
 
 if (-not (Test-Path (Join-Path $FrontendRoot "node_modules"))) {
@@ -92,11 +104,13 @@ if (-not (Test-Path (Join-Path $FrontendRoot "node_modules"))) {
 
 if ($CheckOnly) {
     Write-Host "Check complete. Backend port: $BackendPort; frontend port: $FrontendPort; demo data: $DemoDataEnabled"
+    Write-Host "free-stockdb SDK path: $env:ASHARE_FREE_STOCKDB_SDK_PATH"
     exit 0
 }
 
 $backendCommand = @"
 `$env:ASHARE_DEMO_DATA = '$DemoDataEnabled'
+`$env:ASHARE_FREE_STOCKDB_SDK_PATH = '$env:ASHARE_FREE_STOCKDB_SDK_PATH'
 Set-Location '$ProjectRoot'
 python -m uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port $BackendPort
 "@
@@ -145,6 +159,7 @@ Start-Sleep -Seconds 3
 Write-Host "API health: $backendHealthUrl" -ForegroundColor DarkCyan
 Write-Host "Open: $frontendUrl" -ForegroundColor Green
 Write-Host "Demo data enabled: $DemoDataEnabled"
+Write-Host "free-stockdb SDK path: $env:ASHARE_FREE_STOCKDB_SDK_PATH"
 
 if (-not $NoOpen) {
     Start-Process $frontendUrl
