@@ -410,7 +410,10 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             raise ValueError("Announcements refresh requires a symbol.")
         fetched_at = datetime.now(UTC)
         announcements = cninfo_announcements(symbol, page_size=30)
-        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_announcements(announcements, fetched_at)}
+        records_written = repository.save_announcements(announcements, fetched_at)
+        if not announcements:
+            repository.record_source_success("announcements", "cninfo_announcements", 0)
+        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": records_written}
 
     if module_id == "signals":
         if not symbol:

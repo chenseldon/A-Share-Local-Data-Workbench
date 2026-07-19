@@ -151,6 +151,55 @@ def test_module_refresh_reports_uses_connector_and_cache(tmp_path: Path, monkeyp
         assert any(row["source"] == "iwencai_search" and row["status"] == "needs_key" for row in payload["reports"]["source_status"])
 
 
+def test_announcements_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "announcements-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_announcements(
+        [
+            {
+                "id": "cninfo-600519-123456",
+                "symbol": "600519.SH",
+                "title": "Mock announcement",
+                "published_at": "2026-07-15",
+                "url": "https://www.cninfo.com.cn/new/disclosure/detail?announcementId=123456",
+                "source": "cninfo_announcements",
+                "raw_payload_hash": "hash-1",
+            }
+        ],
+        fetched_at,
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/announcements/data?symbol=600519.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["rows"][0]["title"] == "Mock announcement"
+        assert payload["announcements"]["sections"][0]["title"] == "CNINFO Announcement Snapshot"
+        assert payload["announcements"]["sections"][0]["cards"][0]["value"] == 1
+        assert payload["announcements"]["tables"][0]["rows"][0]["url"].endswith("announcementId=123456")
+        assert any(row["source"] == "mootdx_f10_latest" and row["status"] == "optional_dependency_missing" for row in payload["announcements"]["source_status"])
+        assert any(row["source"] == "announcements_backup" and row["status"] == "prepared" for row in payload["announcements"]["source_status"])
+
+
+def test_announcements_refresh_records_empty_success(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "announcements-refresh.duckdb"
+    monkeypatch.setattr("app.main.cninfo_announcements", lambda symbol, page_size=30: [])
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/announcements/refresh?symbol=600519.SH")
+        assert refresh.status_code == 200
+        assert refresh.json()["status"] == "fresh"
+        assert refresh.json()["records_written"] == 0
+
+        data = client.get("/api/modules/announcements/data?symbol=600519.SH")
+        assert data.status_code == 200
+        source_status = data.json()["announcements"]["source_status"]
+        assert any(row["source"] == "cninfo_announcements" and row["status"] == "fresh" for row in source_status)
+
+
 def test_signals_module_data_returns_structured_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "signals-payload.duckdb"
     fetched_at = datetime(2026, 7, 15, 10, 30, 0)

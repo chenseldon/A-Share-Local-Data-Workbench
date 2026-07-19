@@ -61,6 +61,7 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("fundamentals", "mootdx_finance", "mootdx", "TDX finance snapshot and F10 profile.", "optional_dependency_missing", optional_dependency="mootdx"),
     ConnectorCapability("announcements", "cninfo_announcements", "CNINFO", "Full-text announcement search and detail URL.", "wired"),
     ConnectorCapability("announcements", "mootdx_f10_latest", "mootdx", "TDX F10 latest tips and announcement summary.", "optional_dependency_missing", optional_dependency="mootdx"),
+    ConnectorCapability("announcements", "announcements_backup", "SZSE official / Eastmoney", "Backup announcement route documented by a-stock-data; not used as the default CNINFO source.", "prepared"),
     ConnectorCapability("limit_up", "em_zt_pool", "Eastmoney push2ex", "Limit-up pool.", "planned"),
     ConnectorCapability("limit_up", "em_zb_pool", "Eastmoney push2ex", "Broken-board pool.", "planned"),
     ConnectorCapability("limit_up", "em_dt_pool", "Eastmoney push2ex", "Down-limit pool.", "planned"),

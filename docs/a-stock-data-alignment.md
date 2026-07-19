@@ -34,7 +34,9 @@
 | Chip/Liquidity | `stock_fund_flow_120d` | Writes daily fund-flow rows into `money_flow`; this remains the 120-trading-day money-flow cache. |
 | Fundamentals | `eastmoney_stock_info` | Updates `securities` and `fundamentals` with profile and market-cap context. |
 | Fundamentals | `sina_financial_report` | Writes statement records into `module_records`. |
-| Announcements | `cninfo_announcements` | Writes announcement titles, timestamps and detail URLs into `announcements`. |
+| Announcements | `cninfo_announcements` | Writes CNINFO announcement titles, timestamps and detail URLs into `announcements`, using dynamic `orgId` lookup with fallback rules. |
+| Announcements | `mootdx_f10_latest` | Tracked as an optional F10 latest-announcement summary capability; not enabled unless `mootdx` is installed and configured. |
+| Announcements | `announcements_backup` | Registered as a prepared backup route from `a-stock-data`: SZSE official announcements for Shenzhen tickers and Eastmoney announcement PDFs for Shanghai tickers. |
 
 ## API Surface
 
@@ -43,6 +45,7 @@
 - `GET /api/modules/signals/data?symbol=600519.SH` returns both legacy `rows` and a structured `signals` payload with dynamic sections, tables, and source statuses.
 - `GET /api/modules/news/data?symbol=600519.SH` returns both legacy `rows` and a structured `news` payload with stock news, CLS telegraphs, global news and source statuses. Market-wide news remains visible inside a symbol-scoped News view.
 - `GET /api/modules/chip_liquidity/data?symbol=600519.SH` returns both legacy `rows` and a structured `chip_liquidity` payload with dynamic sections, tables, and source statuses.
+- `GET /api/modules/announcements/data?symbol=600519.SH` returns both legacy `rows` and a structured `announcements` payload with CNINFO sections, announcement tables, optional mootdx F10 status and backup-route status.
 - `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
 
 ## Safety

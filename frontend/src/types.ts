@@ -193,6 +193,7 @@ export interface ModuleDataResponse {
   status: FreshnessState | "not_found";
   rows: DataRow[];
   market?: MarketModuleData;
+  announcements?: AnnouncementsModuleData;
   reports?: ReportsModuleData;
   signals?: SignalsModuleData;
   news?: NewsModuleData;
@@ -263,6 +264,13 @@ export interface ReportModuleTable {
 }
 
 export interface SignalsModuleData {
+  symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
+  source_status: MarketSourceStatus[];
+}
+
+export interface AnnouncementsModuleData {
   symbol: string | null;
   sections: ReportModuleSection[];
   tables: ReportModuleTable[];

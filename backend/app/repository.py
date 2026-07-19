@@ -606,6 +606,91 @@ class DataRepository:
             (limit,),
         )
 
+    def _announcements_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        announcement_rows = self.list_announcements(symbol, limit)
+        latest = announcement_rows[0] if announcement_rows else None
+        source_status = self._announcements_source_status()
+        latest_time = _latest_fetched_at(announcement_rows)
+        sections = [
+            {
+                "id": "cninfo_snapshot",
+                "title": "CNINFO Announcement Snapshot",
+                "source": "cninfo_announcements",
+                "fetched_at": latest_time,
+                "cards": [
+                    {"label": "Announcements", "value": len(announcement_rows)},
+                    {"label": "Latest title", "value": latest.get("title") if latest else None},
+                    {"label": "Latest date", "value": latest.get("published_at") if latest else None},
+                    _source_capability_card(source_status, "cninfo_announcements", "CNINFO full text"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "cninfo_announcements", "CNINFO full-text search"),
+                    _source_capability_card(source_status, "cninfo_orgid_map", "CNINFO orgId map"),
+                    _source_capability_card(source_status, "mootdx_f10_latest", "mootdx F10 latest tips"),
+                    _source_capability_card(source_status, "announcements_backup", "Official backup route"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "cninfo_announcements",
+                "title": "CNINFO Announcements",
+                "rows": announcement_rows,
+                "columns": [
+                    {"key": "published_at", "label": "Published at"},
+                    {"key": "title", "label": "Title"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            }
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _announcements_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'announcements'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "cninfo_announcements": {"status": "not_collected", "last_error": None},
+            "cninfo_orgid_map": {"status": "prepared", "last_error": "CNINFO orgId is resolved from the official szse_stock.json mapping with fallback rules."},
+            "mootdx_f10_latest": {"status": "optional_dependency_missing", "last_error": "mootdx optional dependency is not installed/enabled; F10 latest announcement summary is unavailable."},
+            "announcements_backup": {
+                "status": "prepared",
+                "last_error": "Backup route is documented from a-stock-data: SZSE official for Shenzhen tickers and Eastmoney announcement PDF for Shanghai tickers; it is not used as the default CNINFO source.",
+            },
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "announcements",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
+
     def list_reports(self, symbol: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         if symbol:
             return self._fetch_all(
@@ -655,6 +740,7 @@ class DataRepository:
         if module is None:
             return {"module": module_id, "status": "not_found", "rows": []}
         market_payload = None
+        announcements_payload = None
         reports_payload = None
         signals_payload = None
         news_payload = None
@@ -667,6 +753,7 @@ class DataRepository:
             rows = self._list_fundamentals(symbol, limit)
         elif module_id == "announcements":
             rows = self.list_announcements(symbol, limit)
+            announcements_payload = self._announcements_layer_payload(symbol, limit)
         elif module_id == "reports":
             rows = self.list_reports(symbol, limit)
             reports_payload = self._reports_layer_payload(symbol, limit)
@@ -689,6 +776,8 @@ class DataRepository:
         result: dict[str, Any] = {"module": module_id, "status": status, "rows": rows}
         if market_payload is not None:
             result["market"] = market_payload
+        if announcements_payload is not None:
+            result["announcements"] = announcements_payload
         if reports_payload is not None:
             result["reports"] = reports_payload
         if signals_payload is not None:

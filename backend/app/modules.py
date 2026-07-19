@@ -83,8 +83,8 @@ MODULES: tuple[ModuleDefinition, ...] = (
         "SSE, SZSE and BSE announcements with CNINFO search and PDF links where available.",
         "configured",
         ("announcements",),
-        ("CNINFO", "mootdx optional"),
-        ("announcement title", "published time", "PDF URL", "exchange scope"),
+        ("CNINFO", "mootdx optional", "SZSE/Eastmoney backup prepared"),
+        ("announcement title", "published time", "detail URL", "backup route status"),
     ),
     ModuleDefinition(
         "limit_up",
@@ -117,6 +117,5 @@ MODULES: tuple[ModuleDefinition, ...] = (
         ("interactive Q&A", "10jqka hot ranking", "Eastmoney popularity", "concept hit"),
     ),
 )
-
 
 MODULE_BY_ID = {module.id: module for module in MODULES}
