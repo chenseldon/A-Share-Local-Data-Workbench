@@ -10,6 +10,7 @@
 - Use DuckDB for the V1 local database because it is lightweight, file-based, and suitable for local research snapshots.
 - Use React + Vite + TypeScript for the workbench UI.
 - Keep all trading actions out of scope.
+- Project-level sub-agent prompts are kept as root `agents/*.toml` templates using Codex-compatible agent role fields. Automatic discovery from the project root has not been verified, so the files should be treated as project-local templates unless the runtime explicitly loads them.
 - Use `start_workbench.cmd` as the Windows one-click local dev launcher; it starts backend and frontend in separate terminal windows and defaults to no fixture data. Use `-DemoData` only for labeled fixture validation.
 - V1.1 treats public market refresh as an explicit `POST /api/security/{symbol}/refresh` action; normal page loads read DuckDB cache first to reduce public-source request pressure.
 - Use Tencent public endpoints for the first read-only quote/K-line connector and `lightweight-charts` for the TradingView-style local K-line panel.
