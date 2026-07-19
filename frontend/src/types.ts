@@ -199,6 +199,7 @@ export interface ModuleDataResponse {
   signals?: SignalsModuleData;
   news?: NewsModuleData;
   chip_liquidity?: ChipLiquidityModuleData;
+  limit_up?: LimitUpModuleData;
   etf_options?: EtfOptionsModuleData;
 }
 
@@ -302,6 +303,15 @@ export interface ChipLiquidityModuleData {
 
 export interface EtfOptionsModuleData {
   symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
+  source_status: MarketSourceStatus[];
+}
+
+export interface LimitUpModuleData {
+  symbol: string | null;
+  trade_date: string | null;
+  selected_symbol_hits: DataRow[];
   sections: ReportModuleSection[];
   tables: ReportModuleTable[];
   source_status: MarketSourceStatus[];

@@ -15,6 +15,10 @@ from .connectors.astock_sources import (
     block_trade,
     cninfo_announcements,
     dividend_history,
+    em_dt_pool,
+    em_yzt_pool,
+    em_zb_pool,
+    em_zt_pool,
     eastmoney_concept_blocks,
     eastmoney_dragon_tiger_board,
     eastmoney_fund_flow_minute,
@@ -23,6 +27,7 @@ from .connectors.astock_sources import (
     eastmoney_reports,
     eastmoney_stock_info,
     holder_num_change,
+    limit_up_sentiment,
     margin_trading,
     normalize_eastmoney_stock_profile,
     normalize_eastmoney_industry_report,
@@ -30,6 +35,7 @@ from .connectors.astock_sources import (
     sina_etf_option_records,
     sina_financial_report,
     stock_fund_flow_120d,
+    ths_limit_up_pool,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
 from .connectors.news_sources import cls_telegraph, eastmoney_global_news, eastmoney_stock_news
@@ -525,6 +531,48 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             "optional_results": optional_results,
         }
 
+    if module_id == "limit_up":
+        selected_date = datetime.now(UTC).date().strftime("%Y%m%d")
+        records_written = 0
+        optional_results: dict[str, object] = {}
+        fetched_records: dict[str, list[object]] = {}
+        fetchers = (
+            ("em_zt_pool", lambda: em_zt_pool(selected_date)),
+            ("em_zb_pool", lambda: em_zb_pool(selected_date)),
+            ("em_dt_pool", lambda: em_dt_pool(selected_date)),
+            ("em_yzt_pool", lambda: em_yzt_pool(selected_date)),
+            ("ths_limit_up_pool", lambda: ths_limit_up_pool(selected_date)),
+        )
+        for source, fetcher in fetchers:
+            try:
+                records = fetcher()
+                written = repository.save_module_records(records)
+                if not records:
+                    repository.record_source_success("limit_up", source, 0)
+                fetched_records[source] = records
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+            except AStockSourceError as exc:
+                repository.record_source_failure("limit_up", source, str(exc))
+                optional_results[source] = {"status": "failed", "error": str(exc)}
+        sentiment = limit_up_sentiment(
+            selected_date,
+            fetched_records.get("em_zt_pool", []),  # type: ignore[arg-type]
+            fetched_records.get("em_zb_pool", []),  # type: ignore[arg-type]
+            fetched_records.get("em_dt_pool", []),  # type: ignore[arg-type]
+            fetched_records.get("em_yzt_pool", []),  # type: ignore[arg-type]
+        )
+        sentiment_written = repository.save_module_records([sentiment])
+        records_written += sentiment_written
+        optional_results["limit_up_sentiment"] = {"status": "fresh", "records_written": sentiment_written}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {
+            "module": module_id,
+            "status": status,
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
+
     if module_id == "etf_options":
         option_symbol = symbol or "510050.SH"
         records = sina_etf_option_records(option_symbol)
@@ -565,6 +613,7 @@ def _default_source_for_module(module_id: str) -> str:
         "signals": "eastmoney_concept_blocks",
         "news": "eastmoney_stock_news",
         "chip_liquidity": "stock_fund_flow_120d",
+        "limit_up": "em_zt_pool",
         "etf_options": "sina_option_codes",
     }.get(module_id, "not_configured")
 

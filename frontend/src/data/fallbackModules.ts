@@ -83,11 +83,11 @@ export const fallbackModules: ModuleDefinition[] = [
     label: "Limit-Up Board",
     layer: "打板层",
     description: "Limit-up, broken-board, down-limit, yesterday limit-up, theme reason and board-height structure.",
-    status: "prepared",
-    tables: ["limit_up_pool"],
+    status: "configured",
+    tables: ["module_records", "limit_up_pool legacy"],
     sources: ["Eastmoney push2ex", "10jqka"],
-    planned_fields: ["limit-up pool", "broken board", "down-limit pool", "limit-up reason", "board height"],
-    capabilities: { planned: 6 }
+    planned_fields: ["limit-up pool", "broken-board pool", "limit-down pool", "yesterday limit-up", "limit-up reason", "board ladder"],
+    capabilities: { wired: 6 }
   },
   {
     id: "etf_options",

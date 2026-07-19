@@ -1169,6 +1169,130 @@ export function ModuleView({
     );
   }
 
+  if (module.id === "limit_up") {
+    const limitUpPayload = data?.limit_up;
+    const limitUpSections = limitUpPayload?.sections ?? [];
+    const limitUpTables = limitUpPayload?.tables ?? [];
+    const visibleLimitUpTables = limitUpTables.filter((table) => table.rows.length > 0);
+    const selectedHits = limitUpPayload?.selected_symbol_hits ?? [];
+
+    return (
+      <div className="content-grid module-reports-grid module-limit-up-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Eastmoney push2ex limit-up, broken-board, limit-down and yesterday limit-up pools, plus 10jqka reason insight where available.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol ?? "Market-wide"}</span>
+            {limitUpPayload?.trade_date && <span>{limitUpPayload.trade_date}</span>}
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading limit-up board data...</div>}
+        {error && <EmptyState title="Limit-up board request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {limitUpSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {selectedSymbol && (
+              <section className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>Selected Symbol Hits</h2>
+                  </div>
+                  <StatusBadge status={selectedHits.length > 0 ? "fresh" : "not_collected"} />
+                </div>
+                {selectedHits.length > 0 ? (
+                  <DataTable
+                    rows={selectedHits}
+                    columns={[
+                      { key: "pool", label: "Pool" },
+                      { key: "symbol", label: "Symbol" },
+                      { key: "name", label: "Name" },
+                      { key: "price", label: "Price" },
+                      { key: "pct", label: "Change %" },
+                      { key: "reason", label: "Reason" },
+                      { key: "zt_stat", label: "N-day boards" },
+                      { key: "source", label: "Source" },
+                      { key: "fetched_at", label: "Fetched at" }
+                    ]}
+                    renderCell={renderReportCell}
+                  />
+                ) : (
+                  <EmptyState title="No selected-symbol hit" detail="The current symbol is not present in cached limit-up, broken-board, limit-down, yesterday limit-up or 10jqka insight rows." />
+                )}
+              </section>
+            )}
+
+            {visibleLimitUpTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(limitUpPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {limitUpSections.length === 0 && visibleLimitUpTables.length === 0 && (
+              <EmptyState title="No limit-up board payload" detail="Refresh the module to collect Eastmoney push2ex pools and 10jqka limit-up insight for the selected trade date." />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (module.id === "chip_liquidity") {
     if (!selectedSymbol) {
       return (
