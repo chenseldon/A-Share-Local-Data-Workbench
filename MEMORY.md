@@ -44,6 +44,8 @@
 - Market module numeric panels show source and fetch time in section headers instead of value cards. Index/ETF support is currently a quick-entry workflow that switches symbols through the existing loader, not a full index/ETF browser. mootdx is not installed by default, so five-level order book remains `optional_dependency_missing`.
 - The Research Reports module now exposes a structured dark-theme `reports` payload from `/api/modules/reports/data`, with dynamic sections, company report rows, industry report rows, PDF URLs generated from Eastmoney `infoCode`, and explicit source statuses for Eastmoney, optional 10jqka EPS, and iwencai key availability.
 - Eastmoney reportapi remains the primary reports source. Company reports use `qType=0`; industry reports use `qType=1` as a latest-page V1 feed because precise stock-to-Eastmoney-industry-code filtering is not implemented yet.
+- The Signals module now exposes a structured dark-theme `signals` payload from `/api/modules/signals/data`, with dynamic sections, Eastmoney concept/block ownership, current-symbol minute fund flow, dragon-tiger records/seats, industry ranking, and explicit source statuses.
+- Signals V1 treats Eastmoney concept blocks, Eastmoney minute fund flow, Eastmoney dragon-tiger board, Eastmoney industry comparison, and free-stockdb board mapping as wired/read-only sources. Northbound flow remains a prepared boundary because Shenzhen Connect minute disclosure became less reliable after 2024-08; 10jqka hot reason remains planned until its endpoint is revalidated.
 - Windows backend environments require `tzdata` for `ZoneInfo("Asia/Shanghai")`; it is now a declared backend dependency to keep tests and local runtime reproducible.
 
 ## Secrets

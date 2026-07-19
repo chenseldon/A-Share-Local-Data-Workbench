@@ -18,7 +18,11 @@
 | Market | `free_stockdb_security` | Resolves complete six-digit code searches from the latest local free-stockdb K-line row and writes `securities`. |
 | Market | `tencent_quote` | Writes latest quote and valuation fields into `market_quotes`. |
 | Reports | `eastmoney_reports` | Writes company report metadata and PDF URLs into `reports`. |
-| Signals | `eastmoney_concept_blocks` | Writes block ownership rows into `module_records`. |
+| Signals | `eastmoney_concept_blocks` | Writes Eastmoney stock industry/concept/region ownership rows into `module_records`. |
+| Signals | `eastmoney_fund_flow_minute` | Writes current-symbol intraday minute fund-flow rows into `module_records`; failures are recorded per source. |
+| Signals | `dragon_tiger_board` | Writes current-symbol dragon-tiger records and latest buy/sell seat summaries into `module_records`. |
+| Signals | `industry_comparison` | Writes market-wide Eastmoney industry ranking rows into `module_records`, scoped to the current symbol context for module display. |
+| Signals | `free_stockdb_bk` | Updates Security View sector/concept mapping through the local free-stockdb `bk.get()` connector; displayed alongside Eastmoney block ownership. |
 | Chip/Liquidity | `stock_fund_flow_120d` | Writes daily fund-flow rows into `money_flow`. |
 | Fundamentals | `eastmoney_stock_info` | Updates `securities` and `fundamentals` with profile and market-cap context. |
 | Fundamentals | `sina_financial_report` | Writes statement records into `module_records`. |
@@ -28,6 +32,7 @@
 
 - `GET /api/connectors/capabilities` returns the full V3.4.0 function registry with `wired`, `planned`, `needs_key`, or `optional_dependency_missing`.
 - `POST /api/modules/{module}/refresh?symbol=600519.SH` triggers a module-specific read-only collection job.
+- `GET /api/modules/signals/data?symbol=600519.SH` returns both legacy `rows` and a structured `signals` payload with dynamic sections, tables, and source statuses.
 - `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
 
 ## Safety

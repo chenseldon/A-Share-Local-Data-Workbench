@@ -656,6 +656,7 @@ class DataRepository:
             return {"module": module_id, "status": "not_found", "rows": []}
         market_payload = None
         reports_payload = None
+        signals_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
             rows = ([quote] if quote else []) + self._list_market_bars(symbol, limit)
@@ -671,6 +672,7 @@ class DataRepository:
             rows = self.list_money_flow(symbol, limit)
         elif module_id == "signals":
             rows = self._list_module_records("signals", symbol, limit)
+            signals_payload = self._signals_layer_payload(symbol, limit)
         elif module_id == "limit_up":
             rows = self._list_limit_up(symbol, limit)
         elif module_id in {"news", "etf_options", "sentiment"}:
@@ -683,6 +685,8 @@ class DataRepository:
             result["market"] = market_payload
         if reports_payload is not None:
             result["reports"] = reports_payload
+        if signals_payload is not None:
+            result["signals"] = signals_payload
         return result
 
     def _reports_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
@@ -805,6 +809,219 @@ class DataRepository:
                     {
                         "source": source,
                         "module": "reports",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
+
+    def _signals_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        signal_rows = self._list_module_records("signals", symbol, limit)
+        concept_rows = [row for row in signal_rows if row.get("source") == "eastmoney_concept_blocks"]
+        flow_rows = [row for row in signal_rows if row.get("source") == "eastmoney_fund_flow_minute"]
+        dragon_rows = [row for row in signal_rows if row.get("source") == "eastmoney_dragon_tiger_board"]
+        buy_seats = [row for row in signal_rows if row.get("source") == "eastmoney_dragon_tiger_buy_seats"]
+        sell_seats = [row for row in signal_rows if row.get("source") == "eastmoney_dragon_tiger_sell_seats"]
+        industry_rows = [row for row in signal_rows if row.get("source") == "eastmoney_industry_comparison"]
+        latest_flow = flow_rows[0] if flow_rows else None
+        latest_dragon = dragon_rows[0] if dragon_rows else None
+        top_industry = industry_rows[0] if industry_rows else None
+        source_status = self._signals_source_status()
+        latest_time = _latest_fetched_at(signal_rows)
+        sections = [
+            {
+                "id": "sector_mapping",
+                "title": "Sector / Concept Mapping",
+                "source": "eastmoney_concept_blocks + free_stockdb_bk",
+                "fetched_at": _latest_fetched_at(concept_rows) or latest_time,
+                "cards": [
+                    {"label": "Eastmoney blocks", "value": len(concept_rows)},
+                    {"label": "Primary block", "value": concept_rows[0].get("name") if concept_rows else None},
+                    {"label": "Lead stock", "value": concept_rows[0].get("lead_stock") if concept_rows else None},
+                    _source_capability_card(source_status, "eastmoney_concept_blocks", "Eastmoney ownership"),
+                    _source_capability_card(source_status, "free_stockdb_bk", "free-stockdb board map"),
+                ],
+            },
+            {
+                "id": "fund_flow",
+                "title": "Intraday Fund Flow",
+                "source": "eastmoney_fund_flow_minute",
+                "fetched_at": _latest_fetched_at(flow_rows),
+                "cards": [
+                    {"label": "Minute points", "value": len(flow_rows)},
+                    {"label": "Latest time", "value": latest_flow.get("time") if latest_flow else None},
+                    {"label": "Main net", "value": latest_flow.get("main_net") if latest_flow else None},
+                    {"label": "Super net", "value": latest_flow.get("super_net") if latest_flow else None},
+                    _source_capability_card(source_status, "eastmoney_fund_flow_minute", "Connector"),
+                ],
+            },
+            {
+                "id": "dragon_tiger",
+                "title": "Dragon Tiger Snapshot",
+                "source": "eastmoney_dragon_tiger_board",
+                "fetched_at": _latest_fetched_at(dragon_rows),
+                "cards": [
+                    {"label": "Records", "value": len(dragon_rows)},
+                    {"label": "Latest date", "value": latest_dragon.get("date") if latest_dragon else None},
+                    {"label": "Reason", "value": latest_dragon.get("reason") if latest_dragon else None},
+                    {"label": "Net buy (wan)", "value": latest_dragon.get("net_buy_wan") if latest_dragon else None},
+                    _source_capability_card(source_status, "eastmoney_dragon_tiger_board", "Connector"),
+                ],
+            },
+            {
+                "id": "industry_rotation",
+                "title": "Industry Rotation",
+                "source": "eastmoney_industry_comparison",
+                "fetched_at": _latest_fetched_at(industry_rows),
+                "cards": [
+                    {"label": "Industries", "value": len(industry_rows)},
+                    {"label": "Top industry", "value": top_industry.get("name") if top_industry else None},
+                    {"label": "Top change %", "value": top_industry.get("change_pct") if top_industry else None},
+                    {"label": "Leader", "value": top_industry.get("leader") if top_industry else None},
+                    _source_capability_card(source_status, "eastmoney_industry_comparison", "Connector"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "eastmoney_concept_blocks", "Eastmoney blocks"),
+                    _source_capability_card(source_status, "eastmoney_fund_flow_minute", "Minute fund flow"),
+                    _source_capability_card(source_status, "eastmoney_dragon_tiger_board", "Dragon tiger"),
+                    _source_capability_card(source_status, "eastmoney_industry_comparison", "Industry ranking"),
+                    _source_capability_card(source_status, "hsgt_realtime", "Northbound boundary"),
+                    _source_capability_card(source_status, "ths_hot_reason", "10jqka hot reason"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "concept_blocks",
+                "title": "Sector / Concept Blocks",
+                "rows": concept_rows,
+                "columns": [
+                    {"key": "name", "label": "Name"},
+                    {"key": "code", "label": "Code"},
+                    {"key": "change_pct", "label": "Change %"},
+                    {"key": "lead_stock", "label": "Lead stock"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "record_date", "label": "Record date"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "minute_fund_flow",
+                "title": "Intraday Minute Fund Flow",
+                "rows": flow_rows,
+                "columns": [
+                    {"key": "time", "label": "Time"},
+                    {"key": "main_net", "label": "Main net"},
+                    {"key": "super_net", "label": "Super net"},
+                    {"key": "large_net", "label": "Large net"},
+                    {"key": "mid_net", "label": "Mid net"},
+                    {"key": "small_net", "label": "Small net"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "dragon_tiger_records",
+                "title": "Dragon Tiger Records",
+                "rows": dragon_rows,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "reason", "label": "Reason"},
+                    {"key": "net_buy_wan", "label": "Net buy (wan)"},
+                    {"key": "turnover_pct", "label": "Turnover %"},
+                    {"key": "close", "label": "Close"},
+                    {"key": "change_pct", "label": "Change %"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "dragon_tiger_buy_seats",
+                "title": "Dragon Tiger Buy Seats",
+                "rows": buy_seats,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "name", "label": "Seat"},
+                    {"key": "buy_wan", "label": "Buy (wan)"},
+                    {"key": "sell_wan", "label": "Sell (wan)"},
+                    {"key": "net_wan", "label": "Net (wan)"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "dragon_tiger_sell_seats",
+                "title": "Dragon Tiger Sell Seats",
+                "rows": sell_seats,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "name", "label": "Seat"},
+                    {"key": "buy_wan", "label": "Buy (wan)"},
+                    {"key": "sell_wan", "label": "Sell (wan)"},
+                    {"key": "net_wan", "label": "Net (wan)"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "industry_comparison",
+                "title": "Industry Comparison",
+                "rows": industry_rows,
+                "columns": [
+                    {"key": "rank", "label": "Rank"},
+                    {"key": "name", "label": "Industry"},
+                    {"key": "change_pct", "label": "Change %"},
+                    {"key": "up_count", "label": "Up"},
+                    {"key": "down_count", "label": "Down"},
+                    {"key": "leader", "label": "Leader"},
+                    {"key": "leader_change", "label": "Leader change"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _signals_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'signals'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "eastmoney_concept_blocks": {"status": "not_collected", "last_error": None},
+            "free_stockdb_bk": {"status": "not_collected", "last_error": None},
+            "eastmoney_fund_flow_minute": {"status": "not_collected", "last_error": None},
+            "eastmoney_dragon_tiger_board": {"status": "not_collected", "last_error": None},
+            "eastmoney_industry_comparison": {"status": "not_collected", "last_error": None},
+            "hsgt_realtime": {
+                "status": "prepared",
+                "last_error": "Northbound minute reliability is limited after 2024-08 disclosure changes; check HKEX for authoritative daily data.",
+            },
+            "ths_hot_reason": {
+                "status": "planned",
+                "last_error": "10jqka hot reason endpoint has not been revalidated in this runtime.",
+            },
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "signals",
                         "status": value["status"],
                         "last_success_at": None,
                         "last_failure_at": None,
@@ -1092,6 +1309,11 @@ def _source_capability_card(rows: list[dict[str, Any]], source: str, label: str)
         if row.get("source") == source:
             return {"label": label, "value": _source_status_label(rows, source), "status": row.get("status")}
     return {"label": label, "value": "not collected", "status": "not_collected"}
+
+
+def _latest_fetched_at(rows: list[dict[str, Any]]) -> Any:
+    values = [row.get("fetched_at") for row in rows if row.get("fetched_at")]
+    return max(values) if values else None
 
 
 def _flatten_module_record(row: dict[str, Any]) -> dict[str, Any]:

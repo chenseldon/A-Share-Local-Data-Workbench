@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.connectors.astock_sources import AStockSourceError, ModuleRecord
 from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
 from app.demo_data import seed_demo_data
@@ -148,6 +149,120 @@ def test_module_refresh_reports_uses_connector_and_cache(tmp_path: Path, monkeyp
             for card in section["cards"]
         )
         assert any(row["source"] == "iwencai_search" and row["status"] == "needs_key" for row in payload["reports"]["source_status"])
+
+
+def test_signals_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "signals-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_module_records(
+        [
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_concept_blocks",
+                data_key="BK001",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "name": "Food & Beverage",
+                    "code": "BK001",
+                    "change_pct": 1.2,
+                    "lead_stock": "Mock leader",
+                    "source": "eastmoney_concept_blocks",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-1",
+            ),
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_fund_flow_minute",
+                data_key="600519-2026-07-15 14:55",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "time": "2026-07-15 14:55",
+                    "main_net": 100.0,
+                    "super_net": 20.0,
+                    "large_net": 30.0,
+                    "mid_net": 40.0,
+                    "small_net": 10.0,
+                    "source": "eastmoney_fund_flow_minute",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-2",
+            ),
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_industry_comparison",
+                data_key="BK002",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "rank": 1,
+                    "name": "Food",
+                    "change_pct": 2.3,
+                    "leader": "Mock food stock",
+                    "source": "eastmoney_industry_comparison",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-3",
+            ),
+        ]
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/signals/data?symbol=600519.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["signals"]["sections"][0]["title"] == "Sector / Concept Mapping"
+        assert payload["signals"]["sections"][0]["cards"][0]["value"] == 1
+        assert payload["signals"]["tables"][0]["rows"][0]["name"] == "Food & Beverage"
+        assert payload["signals"]["tables"][1]["rows"][0]["main_net"] == 100.0
+        assert any(row["source"] == "hsgt_realtime" and row["status"] == "prepared" for row in payload["signals"]["source_status"])
+
+
+def test_signals_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "signals-refresh.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_blocks(symbol: str) -> list[ModuleRecord]:
+        assert symbol == "600519.SH"
+        return [
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_concept_blocks",
+                data_key="BK001",
+                symbol=symbol,
+                record_date="2026-07-15",
+                payload={"symbol": symbol, "name": "Food & Beverage", "source": "eastmoney_concept_blocks"},
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-1",
+            )
+        ]
+
+    monkeypatch.setattr("app.main.eastmoney_concept_blocks", fake_blocks)
+    monkeypatch.setattr("app.main.eastmoney_fund_flow_minute", lambda symbol: (_ for _ in ()).throw(AStockSourceError("minute flow failed")))
+    monkeypatch.setattr("app.main.eastmoney_dragon_tiger_board", lambda symbol: [])
+    monkeypatch.setattr("app.main.eastmoney_industry_comparison", lambda symbol: [])
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/signals/refresh?symbol=600519.SH")
+        assert refresh.status_code == 200
+        payload = refresh.json()
+        assert payload["status"] == "fresh"
+        assert payload["records_written"] == 1
+        assert payload["optional_results"]["eastmoney_concept_blocks"]["status"] == "fresh"
+        assert payload["optional_results"]["eastmoney_fund_flow_minute"]["status"] == "failed"
+
+        data = client.get("/api/modules/signals/data?symbol=600519.SH")
+        assert data.status_code == 200
+        source_status = data.json()["signals"]["source_status"]
+        assert any(row["source"] == "eastmoney_fund_flow_minute" and row["status"] == "failed" for row in source_status)
 
 
 def test_symbol_normalization() -> None:

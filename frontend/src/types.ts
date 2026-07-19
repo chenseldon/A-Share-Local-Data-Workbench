@@ -194,6 +194,7 @@ export interface ModuleDataResponse {
   rows: DataRow[];
   market?: MarketModuleData;
   reports?: ReportsModuleData;
+  signals?: SignalsModuleData;
 }
 
 export interface MarketModuleSection {
@@ -257,6 +258,13 @@ export interface ReportModuleTable {
   title: string;
   rows: DataRow[];
   columns: ReportModuleTableColumn[];
+}
+
+export interface SignalsModuleData {
+  symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
+  source_status: MarketSourceStatus[];
 }
 
 export interface ReportsModuleData {

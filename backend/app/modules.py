@@ -41,10 +41,10 @@ MODULES: tuple[ModuleDefinition, ...] = (
         "Signals",
         "信号层",
         "Strong stocks, theme attribution, northbound flow, sector ownership, ranking and event-driven signals.",
-        "prepared",
+        "configured",
         ("module_records",),
-        ("10jqka", "Eastmoney"),
-        ("strong stocks", "themes", "northbound flow", "sector mapping", "dragon tiger list"),
+        ("Eastmoney", "free-stockdb", "10jqka planned", "HKEX boundary"),
+        ("sector mapping", "minute fund flow", "dragon tiger list", "industry ranking", "northbound boundary"),
     ),
     ModuleDefinition(
         "chip_liquidity",
@@ -103,7 +103,7 @@ MODULES: tuple[ModuleDefinition, ...] = (
         "ETF option chains, T-quotes, Greeks and implied volatility.",
         "not_configured",
         (),
-        ("Sina hq.sinajs"),
+        ("Sina hq.sinajs",),
         ("option chain", "T quote", "Delta", "Gamma", "Theta", "Vega", "IV"),
     ),
     ModuleDefinition(

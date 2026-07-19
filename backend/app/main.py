@@ -14,6 +14,9 @@ from .connectors.astock_sources import (
     AStockSourceError,
     cninfo_announcements,
     eastmoney_concept_blocks,
+    eastmoney_dragon_tiger_board,
+    eastmoney_fund_flow_minute,
+    eastmoney_industry_comparison,
     eastmoney_industry_reports,
     eastmoney_reports,
     eastmoney_stock_info,
@@ -407,8 +410,33 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
     if module_id == "signals":
         if not symbol:
             raise ValueError("Signals refresh requires a symbol.")
-        records = eastmoney_concept_blocks(symbol)
-        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_module_records(records)}
+        records_written = 0
+        optional_results: dict[str, object] = {}
+        fetchers = (
+            ("eastmoney_concept_blocks", lambda: eastmoney_concept_blocks(symbol)),
+            ("eastmoney_fund_flow_minute", lambda: eastmoney_fund_flow_minute(symbol)),
+            ("eastmoney_dragon_tiger_board", lambda: eastmoney_dragon_tiger_board(symbol)),
+            ("eastmoney_industry_comparison", lambda: eastmoney_industry_comparison(symbol)),
+        )
+        for source, fetcher in fetchers:
+            try:
+                records = fetcher()
+                written = repository.save_module_records(records)
+                if not records:
+                    repository.record_source_success("signals", source, 0)
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+            except AStockSourceError as exc:
+                repository.record_source_failure("signals", source, str(exc))
+                optional_results[source] = {"status": "failed", "error": str(exc)}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {
+            "module": module_id,
+            "symbol": symbol,
+            "status": status,
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
 
     if module_id == "chip_liquidity":
         if not symbol:

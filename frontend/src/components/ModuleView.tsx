@@ -510,6 +510,135 @@ export function ModuleView({
     );
   }
 
+  if (module.id === "signals") {
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">Signals Layer</span>
+              <h1>Search a symbol to inspect signal data</h1>
+              <p>Signals uses Eastmoney concept ownership, intraday fund flow, dragon-tiger records and industry ranking where the source is available.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol or Chinese name"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const signalsPayload = data?.signals;
+    const signalSections = signalsPayload?.sections ?? [];
+    const signalTables = signalsPayload?.tables ?? [];
+    const visibleSignalTables = signalTables.filter((table) => table.rows.length > 0);
+
+    return (
+      <div className="content-grid module-reports-grid module-signals-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Eastmoney block ownership, intraday fund flow, dragon-tiger records, industry rotation and explicit source boundaries.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol}</span>
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading signals module data...</div>}
+        {error && <EmptyState title="Signals request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {signalSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {visibleSignalTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(signalsPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {signalSections.length === 0 && visibleSignalTables.length === 0 && (
+              <EmptyState title="No signals payload" detail="The signals connector returned no structured sections or table rows for this symbol." />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="content-grid">
       <section className="panel hero-panel">

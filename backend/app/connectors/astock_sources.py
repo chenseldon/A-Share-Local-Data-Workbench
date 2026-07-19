@@ -5,7 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -80,6 +80,11 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _to_wan(value: Any) -> float | None:
+    number = _to_float(value)
+    return round(number / 10000, 2) if number is not None else None
 
 
 def _to_date(value: Any) -> str | None:
@@ -290,6 +295,251 @@ def eastmoney_concept_blocks(symbol: str, client: httpx.Client | None = None) ->
                 payload=payload,
                 fetched_at=fetched_at,
                 raw_payload_hash=payload_hash(payload),
+            )
+        )
+    return records
+
+
+def eastmoney_datacenter(
+    report_name: str,
+    *,
+    filter_str: str = "",
+    page_size: int = 50,
+    page_number: int = 1,
+    sort_columns: str = "",
+    sort_types: str = "",
+    client: httpx.Client | None = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {
+        "sortColumns": sort_columns,
+        "sortTypes": sort_types,
+        "pageSize": str(page_size),
+        "pageNumber": str(page_number),
+        "reportName": report_name,
+        "columns": "ALL",
+        "source": "WEB",
+        "client": "WEB",
+    }
+    if filter_str:
+        params["filter"] = filter_str
+    response = eastmoney_get(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get",
+        params=params,
+        headers={"Referer": "https://data.eastmoney.com/"},
+        timeout=20,
+        client=client,
+    )
+    payload = response.json()
+    rows = (payload.get("result") or {}).get("data") or []
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    return rows if isinstance(rows, list) else []
+
+
+def eastmoney_fund_flow_minute(symbol: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code, exchange = normalized.split(".")
+    market_code = 1 if exchange == "SH" else 0
+    fetched_at = datetime.now(UTC)
+    params = {
+        "secid": f"{market_code}.{code}",
+        "klt": "1",
+        "fields1": "f1,f2,f3,f7",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+    }
+    response = eastmoney_get(
+        "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get",
+        params=params,
+        headers={"Referer": "https://quote.eastmoney.com/", "Origin": "https://quote.eastmoney.com"},
+        timeout=15,
+        client=client,
+    )
+    klines = (response.json().get("data") or {}).get("klines") or []
+    records: list[ModuleRecord] = []
+    for line in klines:
+        parts = str(line).split(",")
+        if len(parts) < 6:
+            continue
+        minute_time = parts[0]
+        payload = {
+            "symbol": normalized,
+            "time": minute_time,
+            "main_net": _to_float(parts[1]),
+            "small_net": _to_float(parts[2]),
+            "mid_net": _to_float(parts[3]),
+            "large_net": _to_float(parts[4]),
+            "super_net": _to_float(parts[5]),
+        }
+        records.append(
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_fund_flow_minute",
+                data_key=f"{code}-{minute_time}",
+                symbol=normalized,
+                record_date=_to_date(minute_time) or fetched_at.date().isoformat(),
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(line),
+            )
+        )
+    return records
+
+
+def eastmoney_dragon_tiger_board(
+    symbol: str,
+    trade_date: str | None = None,
+    look_back: int = 30,
+    client: httpx.Client | None = None,
+) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code = normalized.split(".")[0]
+    fetched_at = datetime.now(UTC)
+    end_date = datetime.fromisoformat(trade_date).date() if trade_date else fetched_at.date()
+    start_date = end_date - timedelta(days=look_back)
+    filter_str = f"(TRADE_DATE>='{start_date.isoformat()}')(TRADE_DATE<='{end_date.isoformat()}')(SECURITY_CODE=\"{code}\")"
+    rows = eastmoney_datacenter(
+        "RPT_DAILYBILLBOARD_DETAILSNEW",
+        filter_str=filter_str,
+        page_size=50,
+        sort_columns="TRADE_DATE",
+        sort_types="-1",
+        client=client,
+    )
+    records: list[ModuleRecord] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        record_date = _to_date(row.get("TRADE_DATE")) or end_date.isoformat()
+        payload = {
+            "symbol": normalized,
+            "date": record_date,
+            "name": row.get("SECURITY_NAME_ABBR") or row.get("SECURITY_NAME") or row.get("SECURITY_NAME_ABBR"),
+            "reason": row.get("EXPLAIN") or row.get("BILLBOARD_NAME") or row.get("TRADE_TYPE"),
+            "net_buy_wan": _to_wan(row.get("BILLBOARD_NET_AMT") or row.get("NET_BUY_AMT")),
+            "buy_wan": _to_wan(row.get("BILLBOARD_BUY_AMT") or row.get("BUY_AMT")),
+            "sell_wan": _to_wan(row.get("BILLBOARD_SELL_AMT") or row.get("SELL_AMT")),
+            "turnover_pct": _to_float(row.get("TURNOVERRATE") or row.get("TURNOVER_RATE")),
+            "close": _to_float(row.get("CLOSE_PRICE") or row.get("CLOSE")),
+            "change_pct": _to_float(row.get("CHANGE_RATE") or row.get("CHANGE_PCT")),
+            "source": "eastmoney_dragon_tiger_board",
+        }
+        records.append(
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_dragon_tiger_board",
+                data_key=f"{code}-{record_date}-{index}",
+                symbol=normalized,
+                record_date=record_date,
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(row),
+            )
+        )
+    if records:
+        latest_date = str(records[0].record_date or end_date.isoformat())
+        records.extend(_eastmoney_dragon_tiger_seats(normalized, latest_date, "buy", client=client))
+        records.extend(_eastmoney_dragon_tiger_seats(normalized, latest_date, "sell", client=client))
+    return records
+
+
+def _eastmoney_dragon_tiger_seats(symbol: str, trade_date: str, side: str, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    code = symbol.split(".")[0]
+    report_name = "RPT_BILLBOARD_DAILYDETAILSBUY" if side == "buy" else "RPT_BILLBOARD_DAILYDETAILSSELL"
+    amount_field = "BUY" if side == "buy" else "SELL"
+    rows = eastmoney_datacenter(
+        report_name,
+        filter_str=f"(TRADE_DATE='{trade_date}')(SECURITY_CODE=\"{code}\")",
+        page_size=10,
+        sort_columns=amount_field,
+        sort_types="-1",
+        client=client,
+    )
+    fetched_at = datetime.now(UTC)
+    records: list[ModuleRecord] = []
+    for index, row in enumerate(rows[:5]):
+        if not isinstance(row, dict):
+            continue
+        payload = {
+            "symbol": symbol,
+            "date": _to_date(row.get("TRADE_DATE")) or trade_date,
+            "side": side,
+            "name": row.get("OPERATEDEPT_NAME") or row.get("OPERATE_DEPT_NAME") or row.get("SALES_DEPT_NAME"),
+            "buy_wan": _to_wan(row.get("BUY")),
+            "sell_wan": _to_wan(row.get("SELL")),
+            "net_wan": _to_wan(row.get("NET")),
+            "source": f"eastmoney_dragon_tiger_{side}_seats",
+        }
+        records.append(
+            ModuleRecord(
+                module="signals",
+                source=f"eastmoney_dragon_tiger_{side}_seats",
+                data_key=f"{code}-{trade_date}-{side}-{index}",
+                symbol=symbol,
+                record_date=payload["date"],
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(row),
+            )
+        )
+    return records
+
+
+def eastmoney_industry_comparison(
+    symbol: str | None = None,
+    top_n: int = 20,
+    client: httpx.Client | None = None,
+) -> list[ModuleRecord]:
+    normalized_symbol = normalize_symbol(symbol) if symbol else None
+    fetched_at = datetime.now(UTC)
+    params = {
+        "pn": "1",
+        "pz": str(max(top_n, 20)),
+        "po": "1",
+        "np": "1",
+        "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+        "fltt": "2",
+        "invt": "2",
+        "fid": "f3",
+        "fs": "m:90+t:2",
+        "fields": "f2,f3,f4,f6,f12,f13,f14,f104,f105,f128,f136,f140,f141,f207",
+    }
+    response = eastmoney_get(
+        "https://push2.eastmoney.com/api/qt/clist/get",
+        params=params,
+        headers={"Referer": "https://quote.eastmoney.com/"},
+        timeout=15,
+        client=client,
+    )
+    diff = (response.json().get("data") or {}).get("diff") or []
+    items = list(diff.values()) if isinstance(diff, dict) else diff
+    records: list[ModuleRecord] = []
+    for rank, item in enumerate(items[:top_n], start=1):
+        if not isinstance(item, dict):
+            continue
+        payload = {
+            "symbol": normalized_symbol,
+            "rank": rank,
+            "name": item.get("f14"),
+            "code": item.get("f12"),
+            "change_pct": _to_float(item.get("f3")),
+            "amount": _to_float(item.get("f6")),
+            "up_count": item.get("f104"),
+            "down_count": item.get("f105"),
+            "leader": item.get("f128") or item.get("f140"),
+            "leader_change": _to_float(item.get("f136") or item.get("f207")),
+            "scope": "market_wide",
+            "source": "eastmoney_industry_comparison",
+        }
+        records.append(
+            ModuleRecord(
+                module="signals",
+                source="eastmoney_industry_comparison",
+                data_key=str(payload["code"] or rank),
+                symbol=normalized_symbol,
+                record_date=fetched_at.date().isoformat(),
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(item),
             )
         )
     return records
