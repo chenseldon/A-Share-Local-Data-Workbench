@@ -78,10 +78,10 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability("etf_options", "sina_option_codes", "Sina hq.sinajs", "ETF option contract list.", "wired"),
     ConnectorCapability("etf_options", "sina_option_tquote", "Sina hq.sinajs", "ETF option T-quote.", "wired"),
     ConnectorCapability("etf_options", "sina_option_greeks", "Sina hq.sinajs", "Greeks and implied volatility.", "wired"),
-    ConnectorCapability("sentiment", "cninfo_irm", "CNINFO Hudongyi", "Investor Q&A.", "planned"),
-    ConnectorCapability("sentiment", "ths_hot_list", "10jqka", "10jqka hot ranking.", "planned"),
-    ConnectorCapability("sentiment", "em_hot_rank", "Eastmoney appdata", "Eastmoney popularity ranking.", "planned"),
-    ConnectorCapability("sentiment", "em_hot_concept", "Eastmoney appdata", "Hot concept hits for a stock.", "planned"),
+    ConnectorCapability("sentiment", "cninfo_irm", "CNINFO Hudongyi", "Investor Q&A.", "wired"),
+    ConnectorCapability("sentiment", "ths_hot_list", "10jqka", "10jqka hot ranking.", "wired", note="Public endpoint may drift or throttle."),
+    ConnectorCapability("sentiment", "em_hot_rank", "Eastmoney appdata", "Eastmoney popularity ranking.", "wired"),
+    ConnectorCapability("sentiment", "em_hot_concept", "Eastmoney appdata", "Hot concept hits for a stock.", "wired"),
 )
 
 

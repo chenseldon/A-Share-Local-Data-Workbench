@@ -747,6 +747,7 @@ class DataRepository:
         news_payload = None
         chip_liquidity_payload = None
         limit_up_payload = None
+        sentiment_payload = None
         etf_options_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
@@ -777,7 +778,8 @@ class DataRepository:
             rows = self._list_module_records("etf_options", symbol, limit)
             etf_options_payload = self._etf_options_layer_payload(symbol, limit)
         elif module_id == "sentiment":
-            rows = self._list_module_records(module_id, symbol, limit)
+            rows = self._list_sentiment_records(symbol, limit)
+            sentiment_payload = self._sentiment_layer_payload(symbol, limit)
         else:
             rows = []
         status = "ok" if rows else ("not_collected" if module.status != "not_configured" else "not_configured")
@@ -798,6 +800,8 @@ class DataRepository:
             result["chip_liquidity"] = chip_liquidity_payload
         if limit_up_payload is not None:
             result["limit_up"] = limit_up_payload
+        if sentiment_payload is not None:
+            result["sentiment"] = sentiment_payload
         if etf_options_payload is not None:
             result["etf_options"] = etf_options_payload
         return result
@@ -1189,6 +1193,185 @@ class DataRepository:
                     {
                         "source": source,
                         "module": "limit_up",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
+
+    def _sentiment_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        sentiment_rows = self._list_sentiment_records(symbol, limit)
+        irm_rows = [row for row in sentiment_rows if row.get("source") == "cninfo_irm"]
+        ths_rows = [row for row in sentiment_rows if row.get("source") == "ths_hot_list"]
+        em_rank_rows = [row for row in sentiment_rows if row.get("source") == "em_hot_rank"]
+        concept_rows = [row for row in sentiment_rows if row.get("source") == "em_hot_concept"]
+        latest_irm = irm_rows[0] if irm_rows else None
+        latest_ths = ths_rows[0] if ths_rows else None
+        latest_em_rank = em_rank_rows[0] if em_rank_rows else None
+        latest_concept = concept_rows[0] if concept_rows else None
+        selected_upper = symbol.upper() if symbol else None
+        current_ths_rank = next((row for row in ths_rows if selected_upper and str(row.get("symbol", "")).upper() == selected_upper), None)
+        current_em_rank = next((row for row in em_rank_rows if selected_upper and str(row.get("symbol", "")).upper() == selected_upper), None)
+        answered = sum(1 for row in irm_rows if row.get("answered"))
+        source_status = self._sentiment_source_status()
+        latest_time = _latest_fetched_at(sentiment_rows)
+        sections = [
+            {
+                "id": "investor_qa",
+                "title": "Investor Q&A Snapshot",
+                "source": "cninfo_irm",
+                "fetched_at": _latest_fetched_at(irm_rows),
+                "cards": [
+                    {"label": "Questions", "value": len(irm_rows)},
+                    {"label": "Answered", "value": answered},
+                    {"label": "Unanswered", "value": len(irm_rows) - answered},
+                    {"label": "Latest question", "value": latest_irm.get("question") if latest_irm else None},
+                    {"label": "Latest answerer", "value": latest_irm.get("answerer") if latest_irm else None},
+                    _source_capability_card(source_status, "cninfo_irm", "CNINFO IRM"),
+                ],
+            },
+            {
+                "id": "ths_hot_list",
+                "title": "10jqka Hot List Snapshot",
+                "source": "ths_hot_list",
+                "fetched_at": _latest_fetched_at(ths_rows),
+                "cards": [
+                    {"label": "Hot list rows", "value": len(ths_rows)},
+                    {"label": "Top name", "value": latest_ths.get("name") if latest_ths else None},
+                    {"label": "Top heat", "value": latest_ths.get("heat") if latest_ths else None},
+                    {"label": "Selected rank", "value": current_ths_rank.get("rank") if current_ths_rank else None},
+                    {"label": "Concept tags", "value": latest_ths.get("concepts") if latest_ths else None},
+                    _source_capability_card(source_status, "ths_hot_list", "10jqka hot list"),
+                ],
+            },
+            {
+                "id": "eastmoney_popularity",
+                "title": "Eastmoney Popularity Snapshot",
+                "source": "em_hot_rank",
+                "fetched_at": _latest_fetched_at(em_rank_rows),
+                "cards": [
+                    {"label": "Popularity rows", "value": len(em_rank_rows)},
+                    {"label": "Top name", "value": latest_em_rank.get("name") if latest_em_rank else None},
+                    {"label": "Top change %", "value": latest_em_rank.get("change_pct") if latest_em_rank else None},
+                    {"label": "Selected rank", "value": current_em_rank.get("rank") if current_em_rank else None},
+                    {"label": "Selected rank change", "value": current_em_rank.get("rank_change") if current_em_rank else None},
+                    _source_capability_card(source_status, "em_hot_rank", "Eastmoney popularity"),
+                ],
+            },
+            {
+                "id": "concept_hit",
+                "title": "Concept Hit Snapshot",
+                "source": "em_hot_concept",
+                "fetched_at": _latest_fetched_at(concept_rows),
+                "cards": [
+                    {"label": "Concept hits", "value": len(concept_rows)},
+                    {"label": "Top concept", "value": latest_concept.get("concept") if latest_concept else None},
+                    {"label": "Top BK", "value": latest_concept.get("bk") if latest_concept else None},
+                    {"label": "Top heat", "value": latest_concept.get("heat") if latest_concept else None},
+                    _source_capability_card(source_status, "em_hot_concept", "Concept hit"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "cninfo_irm", "Investor Q&A"),
+                    _source_capability_card(source_status, "ths_hot_list", "10jqka hot list"),
+                    _source_capability_card(source_status, "em_hot_rank", "Eastmoney popularity"),
+                    _source_capability_card(source_status, "em_hot_concept", "Concept hits"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "investor_qa",
+                "title": "CNINFO Investor Q&A",
+                "rows": irm_rows,
+                "columns": [
+                    {"key": "asked_at", "label": "Asked at"},
+                    {"key": "question", "label": "Question"},
+                    {"key": "answer", "label": "Answer"},
+                    {"key": "answerer", "label": "Answerer"},
+                    {"key": "answered", "label": "Answered"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "ths_hot_list",
+                "title": "10jqka Hot List",
+                "rows": ths_rows,
+                "columns": [
+                    {"key": "rank", "label": "Rank"},
+                    {"key": "code", "label": "Code"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "heat", "label": "Heat"},
+                    {"key": "concepts", "label": "Concept tags"},
+                    {"key": "rank_change", "label": "Rank change"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "eastmoney_popularity",
+                "title": "Eastmoney Popularity Rank",
+                "rows": em_rank_rows,
+                "columns": [
+                    {"key": "rank", "label": "Rank"},
+                    {"key": "code", "label": "Code"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "price", "label": "Price"},
+                    {"key": "change_pct", "label": "Change %"},
+                    {"key": "rank_change", "label": "Rank change"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "concept_hits",
+                "title": "Eastmoney Concept Hits",
+                "rows": concept_rows,
+                "columns": [
+                    {"key": "concept", "label": "Concept"},
+                    {"key": "bk", "label": "BK"},
+                    {"key": "heat", "label": "Heat"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _sentiment_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'sentiment'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "cninfo_irm": {"status": "not_collected", "last_error": "CNINFO latest questions may be unanswered; unanswered is not treated as a connector failure."},
+            "ths_hot_list": {"status": "not_collected", "last_error": "10jqka public hot-list endpoint can be rate-limited or field-drift."},
+            "em_hot_rank": {"status": "not_collected", "last_error": "Eastmoney popularity ranking is an appdata feed and not a trading signal."},
+            "em_hot_concept": {"status": "not_collected", "last_error": "Eastmoney concept hits are collected per selected symbol."},
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "sentiment",
                         "status": value["status"],
                         "last_success_at": None,
                         "last_failure_at": None,
@@ -2340,6 +2523,36 @@ class DataRepository:
                 SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
                 FROM module_records
                 WHERE module = 'news'
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        return [_flatten_module_record(row) for row in rows]
+
+    def _list_sentiment_records(self, symbol: str | None, limit: int) -> list[dict[str, Any]]:
+        if symbol:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = 'sentiment'
+                  AND (
+                    upper(coalesce(symbol, '')) = ?
+                    OR source IN ('ths_hot_list', 'em_hot_rank')
+                    OR coalesce(symbol, '') = ''
+                  )
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (symbol.upper(), limit),
+            )
+        else:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = 'sentiment'
                 ORDER BY fetched_at DESC, record_date DESC NULLS LAST
                 LIMIT ?
                 """,

@@ -14,8 +14,11 @@ from .connectors.astock_sources import (
     AStockSourceError,
     block_trade,
     cninfo_announcements,
+    cninfo_irm,
     dividend_history,
     em_dt_pool,
+    em_hot_concept,
+    em_hot_rank,
     em_yzt_pool,
     em_zb_pool,
     em_zt_pool,
@@ -35,6 +38,7 @@ from .connectors.astock_sources import (
     sina_etf_option_records,
     sina_financial_report,
     stock_fund_flow_120d,
+    ths_hot_list,
     ths_limit_up_pool,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
@@ -531,6 +535,37 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             "optional_results": optional_results,
         }
 
+    if module_id == "sentiment":
+        if not symbol:
+            raise ValueError("Sentiment refresh requires a symbol.")
+        records_written = 0
+        optional_results: dict[str, object] = {}
+        fetchers = (
+            ("cninfo_irm", lambda: cninfo_irm(symbol)),
+            ("ths_hot_list", lambda: ths_hot_list(period="hour", top=50)),
+            ("em_hot_rank", lambda: em_hot_rank(top=50)),
+            ("em_hot_concept", lambda: em_hot_concept(symbol)),
+        )
+        for source, fetcher in fetchers:
+            try:
+                records = fetcher()
+                written = repository.save_module_records(records)
+                if not records:
+                    repository.record_source_success("sentiment", source, 0)
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+            except (AStockSourceError, ValueError) as exc:
+                repository.record_source_failure("sentiment", source, str(exc))
+                optional_results[source] = {"status": "failed", "error": str(exc)}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {
+            "module": module_id,
+            "symbol": symbol,
+            "status": status,
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
+
     if module_id == "limit_up":
         selected_date = datetime.now(UTC).date().strftime("%Y%m%d")
         records_written = 0
@@ -613,6 +648,7 @@ def _default_source_for_module(module_id: str) -> str:
         "signals": "eastmoney_concept_blocks",
         "news": "eastmoney_stock_news",
         "chip_liquidity": "stock_fund_flow_120d",
+        "sentiment": "cninfo_irm",
         "limit_up": "em_zt_pool",
         "etf_options": "sina_option_codes",
     }.get(module_id, "not_configured")
