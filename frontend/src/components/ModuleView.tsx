@@ -381,6 +381,135 @@ export function ModuleView({
     );
   }
 
+  if (module.id === "news") {
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">News Layer</span>
+              <h1>Search a symbol to inspect news context</h1>
+              <p>News uses Eastmoney stock news, CLS telegrams and Eastmoney 7x24 global news with explicit source status.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol or Chinese name"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const newsPayload = data?.news;
+    const newsSections = newsPayload?.sections ?? [];
+    const newsTables = newsPayload?.tables ?? [];
+    const visibleNewsTables = newsTables.filter((table) => table.rows.length > 0);
+
+    return (
+      <div className="content-grid module-reports-grid module-news-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Eastmoney stock news, CLS telegrams and Eastmoney global 7x24 news with mutual backup status.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol}</span>
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading news module data...</div>}
+        {error && <EmptyState title="News request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {newsSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {visibleNewsTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(newsPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {newsSections.length === 0 && visibleNewsTables.length === 0 && (
+              <EmptyState title="No news payload" detail="The news connectors returned no structured sections or table rows for this symbol." />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (module.id === "reports") {
     if (!selectedSymbol) {
       return (
@@ -632,6 +761,135 @@ export function ModuleView({
 
             {signalSections.length === 0 && visibleSignalTables.length === 0 && (
               <EmptyState title="No signals payload" detail="The signals connector returned no structured sections or table rows for this symbol." />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  if (module.id === "chip_liquidity") {
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">Chip And Liquidity Layer</span>
+              <h1>Search a symbol to inspect chip and liquidity data</h1>
+              <p>Chip/Liquidity uses Eastmoney margin financing, block trades, holder count, dividends and 120-day daily fund flow where sources are available.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol or Chinese name"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const chipPayload = data?.chip_liquidity;
+    const chipSections = chipPayload?.sections ?? [];
+    const chipTables = chipPayload?.tables ?? [];
+    const visibleChipTables = chipTables.filter((table) => table.rows.length > 0);
+
+    return (
+      <div className="content-grid module-reports-grid module-chip-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Eastmoney datacenter margin, block trade, shareholder, dividend and 120-day fund-flow sources with explicit cache status.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol}</span>
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading chip and liquidity module data...</div>}
+        {error && <EmptyState title="Chip and liquidity request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {chipSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {visibleChipTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(chipPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {chipSections.length === 0 && visibleChipTables.length === 0 && (
+              <EmptyState title="No chip/liquidity payload" detail="The chip and liquidity connector returned no structured sections or table rows for this symbol." />
             )}
           </>
         )}

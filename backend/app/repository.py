@@ -657,6 +657,8 @@ class DataRepository:
         market_payload = None
         reports_payload = None
         signals_payload = None
+        news_payload = None
+        chip_liquidity_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
             rows = ([quote] if quote else []) + self._list_market_bars(symbol, limit)
@@ -669,13 +671,17 @@ class DataRepository:
             rows = self.list_reports(symbol, limit)
             reports_payload = self._reports_layer_payload(symbol, limit)
         elif module_id == "chip_liquidity":
-            rows = self.list_money_flow(symbol, limit)
+            rows = self.list_money_flow(symbol, limit) + self._list_module_records("chip_liquidity", symbol, limit)
+            chip_liquidity_payload = self._chip_liquidity_layer_payload(symbol, limit)
         elif module_id == "signals":
             rows = self._list_module_records("signals", symbol, limit)
             signals_payload = self._signals_layer_payload(symbol, limit)
+        elif module_id == "news":
+            rows = self._list_news_records(symbol, limit)
+            news_payload = self._news_layer_payload(symbol, limit)
         elif module_id == "limit_up":
             rows = self._list_limit_up(symbol, limit)
-        elif module_id in {"news", "etf_options", "sentiment"}:
+        elif module_id in {"etf_options", "sentiment"}:
             rows = self._list_module_records(module_id, symbol, limit)
         else:
             rows = []
@@ -687,7 +693,137 @@ class DataRepository:
             result["reports"] = reports_payload
         if signals_payload is not None:
             result["signals"] = signals_payload
+        if news_payload is not None:
+            result["news"] = news_payload
+        if chip_liquidity_payload is not None:
+            result["chip_liquidity"] = chip_liquidity_payload
         return result
+
+    def _news_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        news_rows = self._list_news_records(symbol, limit)
+        stock_news = [row for row in news_rows if row.get("source") == "eastmoney_stock_news"]
+        cls_rows = [row for row in news_rows if row.get("source") == "cls_telegraph"]
+        global_rows = [row for row in news_rows if row.get("source") == "eastmoney_global_news"]
+        latest_stock = stock_news[0] if stock_news else None
+        latest_cls = cls_rows[0] if cls_rows else None
+        latest_global = global_rows[0] if global_rows else None
+        source_status = self._news_source_status()
+        latest_time = _latest_fetched_at(news_rows)
+        sections = [
+            {
+                "id": "stock_news",
+                "title": "Stock News Snapshot",
+                "source": "eastmoney_stock_news",
+                "fetched_at": _latest_fetched_at(stock_news),
+                "cards": [
+                    {"label": "Stock news", "value": len(stock_news)},
+                    {"label": "Latest title", "value": latest_stock.get("title") if latest_stock else None},
+                    {"label": "Latest media", "value": latest_stock.get("media") if latest_stock else None},
+                    {"label": "Latest time", "value": latest_stock.get("time") if latest_stock else None},
+                    _source_capability_card(source_status, "eastmoney_stock_news", "Eastmoney stock news"),
+                ],
+            },
+            {
+                "id": "market_flash",
+                "title": "Market Flash Snapshot",
+                "source": "cls_telegraph + eastmoney_global_news",
+                "fetched_at": _latest_fetched_at(cls_rows) or _latest_fetched_at(global_rows),
+                "cards": [
+                    {"label": "CLS telegrams", "value": len(cls_rows)},
+                    {"label": "Global news", "value": len(global_rows)},
+                    {"label": "Latest CLS", "value": latest_cls.get("title") if latest_cls else None},
+                    {"label": "Latest global", "value": latest_global.get("title") if latest_global else None},
+                    {"label": "Mutual backup", "value": "CLS v1 + Eastmoney 7x24"},
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "eastmoney_stock_news", "Stock news"),
+                    _source_capability_card(source_status, "cls_telegraph", "CLS telegram"),
+                    _source_capability_card(source_status, "eastmoney_global_news", "Eastmoney global"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "stock_news",
+                "title": "Eastmoney Stock News",
+                "rows": stock_news,
+                "columns": [
+                    {"key": "title", "label": "Title"},
+                    {"key": "time", "label": "Time"},
+                    {"key": "media", "label": "Media"},
+                    {"key": "summary", "label": "Summary"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "cls_telegraph",
+                "title": "CLS Telegrams",
+                "rows": cls_rows,
+                "columns": [
+                    {"key": "title", "label": "Title"},
+                    {"key": "time", "label": "Time"},
+                    {"key": "summary", "label": "Summary"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "eastmoney_global_news",
+                "title": "Eastmoney Global News",
+                "rows": global_rows,
+                "columns": [
+                    {"key": "title", "label": "Title"},
+                    {"key": "time", "label": "Time"},
+                    {"key": "media", "label": "Media"},
+                    {"key": "summary", "label": "Summary"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _news_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'news'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "eastmoney_stock_news": {"status": "not_collected", "last_error": None},
+            "cls_telegraph": {"status": "not_collected", "last_error": None},
+            "eastmoney_global_news": {"status": "not_collected", "last_error": None},
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "news",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
 
     def _reports_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         stock_reports = self.list_reports(symbol, limit)
@@ -1031,6 +1167,225 @@ class DataRepository:
                 )
         return rows
 
+    def _chip_liquidity_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        record_rows = self._list_module_records("chip_liquidity", symbol, limit)
+        money_flow_rows = self.list_money_flow(symbol, limit)
+        margin_rows = [row for row in record_rows if row.get("source") == "margin_trading"]
+        block_rows = [row for row in record_rows if row.get("source") == "block_trade"]
+        holder_rows = [row for row in record_rows if row.get("source") == "holder_num_change"]
+        dividend_rows = [row for row in record_rows if row.get("source") == "dividend_history"]
+        latest_margin = margin_rows[0] if margin_rows else None
+        latest_block = block_rows[0] if block_rows else None
+        latest_holder = holder_rows[0] if holder_rows else None
+        latest_dividend = dividend_rows[0] if dividend_rows else None
+        latest_flow = money_flow_rows[0] if money_flow_rows else None
+        source_status = self._chip_liquidity_source_status()
+        all_rows = record_rows + money_flow_rows
+        latest_time = _latest_fetched_at(all_rows)
+        sections = [
+            {
+                "id": "margin_financing",
+                "title": "Margin Financing",
+                "source": "margin_trading",
+                "fetched_at": _latest_fetched_at(margin_rows),
+                "cards": [
+                    {"label": "Records", "value": len(margin_rows)},
+                    {"label": "Latest date", "value": latest_margin.get("date") if latest_margin else None},
+                    {"label": "Margin balance", "value": latest_margin.get("margin_balance") if latest_margin else None},
+                    {"label": "Short balance", "value": latest_margin.get("short_balance") if latest_margin else None},
+                    {"label": "Total balance", "value": latest_margin.get("margin_short_balance") if latest_margin else None},
+                    _source_capability_card(source_status, "margin_trading", "Connector"),
+                ],
+            },
+            {
+                "id": "block_trade",
+                "title": "Block Trades",
+                "source": "block_trade",
+                "fetched_at": _latest_fetched_at(block_rows),
+                "cards": [
+                    {"label": "Records", "value": len(block_rows)},
+                    {"label": "Latest date", "value": latest_block.get("date") if latest_block else None},
+                    {"label": "Price", "value": latest_block.get("price") if latest_block else None},
+                    {"label": "Premium %", "value": latest_block.get("premium_pct") if latest_block else None},
+                    {"label": "Amount", "value": latest_block.get("amount") if latest_block else None},
+                    _source_capability_card(source_status, "block_trade", "Connector"),
+                ],
+            },
+            {
+                "id": "holder_concentration",
+                "title": "Holder Count / Chip Concentration",
+                "source": "holder_num_change",
+                "fetched_at": _latest_fetched_at(holder_rows),
+                "cards": [
+                    {"label": "Records", "value": len(holder_rows)},
+                    {"label": "Latest date", "value": latest_holder.get("date") if latest_holder else None},
+                    {"label": "Holder count", "value": latest_holder.get("holder_num") if latest_holder else None},
+                    {"label": "QoQ change %", "value": latest_holder.get("change_ratio") if latest_holder else None},
+                    {"label": "Avg shares", "value": latest_holder.get("avg_shares") if latest_holder else None},
+                    _source_capability_card(source_status, "holder_num_change", "Connector"),
+                ],
+            },
+            {
+                "id": "dividend_history",
+                "title": "Dividend / Bonus History",
+                "source": "dividend_history",
+                "fetched_at": _latest_fetched_at(dividend_rows),
+                "cards": [
+                    {"label": "Records", "value": len(dividend_rows)},
+                    {"label": "Latest date", "value": latest_dividend.get("date") if latest_dividend else None},
+                    {"label": "Cash dividend", "value": latest_dividend.get("bonus_rmb") if latest_dividend else None},
+                    {"label": "Transfer ratio", "value": latest_dividend.get("transfer_ratio") if latest_dividend else None},
+                    {"label": "Bonus ratio", "value": latest_dividend.get("bonus_ratio") if latest_dividend else None},
+                    _source_capability_card(source_status, "dividend_history", "Connector"),
+                ],
+            },
+            {
+                "id": "fund_flow_120d",
+                "title": "120-Day Fund Flow",
+                "source": "stock_fund_flow_120d",
+                "fetched_at": _latest_fetched_at(money_flow_rows),
+                "cards": [
+                    {"label": "Daily points", "value": len(money_flow_rows)},
+                    {"label": "Latest date", "value": latest_flow.get("trade_date") if latest_flow else None},
+                    {"label": "Main net inflow", "value": latest_flow.get("main_net_inflow") if latest_flow else None},
+                    {"label": "Retail net inflow", "value": latest_flow.get("retail_net_inflow") if latest_flow else None},
+                    {"label": "Turnover rate", "value": latest_flow.get("turnover_rate") if latest_flow else None},
+                    _source_capability_card(source_status, "stock_fund_flow_120d", "Connector"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "margin_trading", "Margin financing"),
+                    _source_capability_card(source_status, "block_trade", "Block trades"),
+                    _source_capability_card(source_status, "holder_num_change", "Holder count"),
+                    _source_capability_card(source_status, "dividend_history", "Dividends"),
+                    _source_capability_card(source_status, "stock_fund_flow_120d", "120-day fund flow"),
+                    _source_capability_card(source_status, "fund_flow_backup", "Sina backup"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "margin_financing",
+                "title": "Margin Financing Detail",
+                "rows": margin_rows,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "margin_balance", "label": "Margin balance"},
+                    {"key": "margin_buy", "label": "Margin buy"},
+                    {"key": "margin_repay", "label": "Margin repay"},
+                    {"key": "short_balance", "label": "Short balance"},
+                    {"key": "short_sell_volume", "label": "Short sell vol"},
+                    {"key": "short_repay_volume", "label": "Short repay vol"},
+                    {"key": "margin_short_balance", "label": "Total balance"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "block_trades",
+                "title": "Block Trades",
+                "rows": block_rows,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "price", "label": "Price"},
+                    {"key": "close", "label": "Close"},
+                    {"key": "premium_pct", "label": "Premium %"},
+                    {"key": "volume", "label": "Volume"},
+                    {"key": "amount", "label": "Amount"},
+                    {"key": "buyer", "label": "Buyer"},
+                    {"key": "seller", "label": "Seller"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "holder_count",
+                "title": "Holder Count Changes",
+                "rows": holder_rows,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "holder_num", "label": "Holder count"},
+                    {"key": "change_num", "label": "Change count"},
+                    {"key": "change_ratio", "label": "Change %"},
+                    {"key": "avg_shares", "label": "Avg shares"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "dividends",
+                "title": "Dividend / Bonus History",
+                "rows": dividend_rows,
+                "columns": [
+                    {"key": "date", "label": "Date"},
+                    {"key": "bonus_rmb", "label": "Cash dividend"},
+                    {"key": "transfer_ratio", "label": "Transfer ratio"},
+                    {"key": "bonus_ratio", "label": "Bonus ratio"},
+                    {"key": "plan", "label": "Plan status"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "fund_flow_120d",
+                "title": "120-Day Fund Flow",
+                "rows": money_flow_rows,
+                "columns": [
+                    {"key": "trade_date", "label": "Trade date"},
+                    {"key": "main_net_inflow", "label": "Main net inflow"},
+                    {"key": "retail_net_inflow", "label": "Retail net inflow"},
+                    {"key": "turnover_rate", "label": "Turnover rate"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _chip_liquidity_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'chip_liquidity'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "margin_trading": {"status": "not_collected", "last_error": None},
+            "block_trade": {"status": "not_collected", "last_error": None},
+            "holder_num_change": {"status": "not_collected", "last_error": None},
+            "dividend_history": {"status": "not_collected", "last_error": None},
+            "stock_fund_flow_120d": {"status": "not_collected", "last_error": None},
+            "fund_flow_backup": {
+                "status": "prepared",
+                "last_error": "Sina daily four-tier fund-flow backup is mapped from a-stock-data but not wired in this V1 module.",
+            },
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "chip_liquidity",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
+
     def _market_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         quote = self.latest_market_quote(symbol) if symbol else None
         latest_bar = self._latest_market_bar(symbol) if symbol else None
@@ -1256,6 +1611,32 @@ class DataRepository:
                 LIMIT ?
                 """,
                 (module_id, limit),
+            )
+        return [_flatten_module_record(row) for row in rows]
+
+    def _list_news_records(self, symbol: str | None, limit: int) -> list[dict[str, Any]]:
+        if symbol:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = 'news'
+                  AND (upper(coalesce(symbol, '')) = ? OR coalesce(symbol, '') = '')
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (symbol.upper(), limit),
+            )
+        else:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = 'news'
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (limit,),
             )
         return [_flatten_module_record(row) for row in rows]
 

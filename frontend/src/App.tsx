@@ -359,7 +359,7 @@ export default function App() {
       .finally(() => setModuleRefreshing(false));
   }
 
-  const darkModuleActive = activeView === "module" && ["market", "reports"].includes(activeModule);
+  const darkModuleActive = activeView === "module" && ["market", "reports", "signals", "chip_liquidity"].includes(activeModule);
   const darkWorkspaceActive = activeView === "security" || darkModuleActive;
 
   return (

@@ -195,6 +195,8 @@ export interface ModuleDataResponse {
   market?: MarketModuleData;
   reports?: ReportsModuleData;
   signals?: SignalsModuleData;
+  news?: NewsModuleData;
+  chip_liquidity?: ChipLiquidityModuleData;
 }
 
 export interface MarketModuleSection {
@@ -261,6 +263,20 @@ export interface ReportModuleTable {
 }
 
 export interface SignalsModuleData {
+  symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
+  source_status: MarketSourceStatus[];
+}
+
+export interface NewsModuleData {
+  symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
+  source_status: MarketSourceStatus[];
+}
+
+export interface ChipLiquidityModuleData {
   symbol: string | null;
   sections: ReportModuleSection[];
   tables: ReportModuleTable[];

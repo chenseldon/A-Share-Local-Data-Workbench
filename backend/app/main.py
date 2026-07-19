@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .connectors.astock_sources import (
     AStockSourceError,
+    block_trade,
     cninfo_announcements,
+    dividend_history,
     eastmoney_concept_blocks,
     eastmoney_dragon_tiger_board,
     eastmoney_fund_flow_minute,
@@ -20,12 +22,15 @@ from .connectors.astock_sources import (
     eastmoney_industry_reports,
     eastmoney_reports,
     eastmoney_stock_info,
+    holder_num_change,
+    margin_trading,
     normalize_eastmoney_industry_report,
     normalize_eastmoney_report,
     sina_financial_report,
     stock_fund_flow_120d,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
+from .connectors.news_sources import cls_telegraph, eastmoney_global_news, eastmoney_stock_news
 from .connectors.public_market import (
     FREE_STOCKDB_EXPECTED_SOURCE_COUNT,
     FREE_STOCKDB_INDICATOR_CONFIG,
@@ -438,12 +443,79 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             "optional_results": optional_results,
         }
 
+    if module_id == "news":
+        records_written = 0
+        optional_results: dict[str, object] = {}
+        fetchers: list[tuple[str, object]] = []
+        if symbol:
+            fetchers.append(("eastmoney_stock_news", lambda: eastmoney_stock_news(symbol)))
+        fetchers.extend(
+            (
+                ("cls_telegraph", cls_telegraph),
+                ("eastmoney_global_news", eastmoney_global_news),
+            )
+        )
+        for source, fetcher in fetchers:
+            try:
+                records = fetcher()  # type: ignore[operator]
+                written = repository.save_module_records(records)
+                if not records:
+                    repository.record_source_success("news", source, 0)
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+            except AStockSourceError as exc:
+                repository.record_source_failure("news", source, str(exc))
+                optional_results[source] = {"status": "failed", "error": str(exc)}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {
+            "module": module_id,
+            "symbol": symbol,
+            "status": status,
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
+
     if module_id == "chip_liquidity":
         if not symbol:
             raise ValueError("Chip and liquidity refresh requires a symbol.")
+        records_written = 0
+        optional_results: dict[str, object] = {}
         fetched_at = datetime.now(UTC)
-        rows = stock_fund_flow_120d(symbol)
-        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": repository.save_money_flow(rows, fetched_at)}
+        record_fetchers = (
+            ("margin_trading", lambda: margin_trading(symbol)),
+            ("block_trade", lambda: block_trade(symbol)),
+            ("holder_num_change", lambda: holder_num_change(symbol)),
+            ("dividend_history", lambda: dividend_history(symbol)),
+        )
+        for source, fetcher in record_fetchers:
+            try:
+                records = fetcher()
+                written = repository.save_module_records(records)
+                if not records:
+                    repository.record_source_success("chip_liquidity", source, 0)
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+            except AStockSourceError as exc:
+                repository.record_source_failure("chip_liquidity", source, str(exc))
+                optional_results[source] = {"status": "failed", "error": str(exc)}
+        try:
+            rows = stock_fund_flow_120d(symbol)
+            written = repository.save_money_flow(rows, fetched_at)
+            if not rows:
+                repository.record_source_success("chip_liquidity", "stock_fund_flow_120d", 0)
+            records_written += written
+            optional_results["stock_fund_flow_120d"] = {"status": "fresh", "records_written": written}
+        except AStockSourceError as exc:
+            repository.record_source_failure("chip_liquidity", "stock_fund_flow_120d", str(exc))
+            optional_results["stock_fund_flow_120d"] = {"status": "failed", "error": str(exc)}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {
+            "module": module_id,
+            "symbol": symbol,
+            "status": status,
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
 
     return {"module": module_id, "symbol": symbol, "status": "not_configured", "records_written": 0}
 
@@ -455,6 +527,7 @@ def _default_source_for_module(module_id: str) -> str:
         "reports": "eastmoney_reports",
         "announcements": "cninfo_announcements",
         "signals": "eastmoney_concept_blocks",
+        "news": "eastmoney_stock_news",
         "chip_liquidity": "stock_fund_flow_120d",
     }.get(module_id, "not_configured")
 

@@ -545,6 +545,179 @@ def eastmoney_industry_comparison(
     return records
 
 
+def margin_trading(symbol: str, page_size: int = 30, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code = normalized.split(".")[0]
+    fetched_at = datetime.now(UTC)
+    rows = eastmoney_datacenter(
+        "RPTA_WEB_RZRQ_GGMX",
+        filter_str=f'(SCODE="{code}")',
+        page_size=page_size,
+        sort_columns="DATE",
+        sort_types="-1",
+        client=client,
+    )
+    records: list[ModuleRecord] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        record_date = _to_date(row.get("DATE")) or fetched_at.date().isoformat()
+        payload = {
+            "symbol": normalized,
+            "date": record_date,
+            "margin_balance": _to_float(row.get("RZYE")),
+            "margin_buy": _to_float(row.get("RZMRE")),
+            "margin_repay": _to_float(row.get("RZCHE")),
+            "short_balance": _to_float(row.get("RQYE")),
+            "short_sell_volume": _to_float(row.get("RQMCL")),
+            "short_repay_volume": _to_float(row.get("RQCHL")),
+            "margin_short_balance": _to_float(row.get("RZRQYE")),
+            "source": "margin_trading",
+        }
+        records.append(
+            ModuleRecord(
+                module="chip_liquidity",
+                source="margin_trading",
+                data_key=f"{code}-{record_date}-{index}",
+                symbol=normalized,
+                record_date=record_date,
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(row),
+            )
+        )
+    return records
+
+
+def block_trade(symbol: str, page_size: int = 20, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code = normalized.split(".")[0]
+    fetched_at = datetime.now(UTC)
+    rows = eastmoney_datacenter(
+        "RPT_DATA_BLOCKTRADE",
+        filter_str=f'(SECURITY_CODE="{code}")',
+        page_size=page_size,
+        sort_columns="TRADE_DATE",
+        sort_types="-1",
+        client=client,
+    )
+    records: list[ModuleRecord] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        record_date = _to_date(row.get("TRADE_DATE")) or fetched_at.date().isoformat()
+        close = _to_float(row.get("CLOSE_PRICE"))
+        deal_price = _to_float(row.get("DEAL_PRICE"))
+        premium_pct = round((deal_price / close - 1) * 100, 2) if close and deal_price else None
+        payload = {
+            "symbol": normalized,
+            "date": record_date,
+            "price": deal_price,
+            "close": close,
+            "premium_pct": premium_pct,
+            "volume": _to_float(row.get("DEAL_VOLUME")),
+            "amount": _to_float(row.get("DEAL_AMT")),
+            "buyer": row.get("BUYER_NAME"),
+            "seller": row.get("SELLER_NAME"),
+            "source": "block_trade",
+        }
+        records.append(
+            ModuleRecord(
+                module="chip_liquidity",
+                source="block_trade",
+                data_key=f"{code}-{record_date}-{index}",
+                symbol=normalized,
+                record_date=record_date,
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(row),
+            )
+        )
+    return records
+
+
+def holder_num_change(symbol: str, page_size: int = 10, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code = normalized.split(".")[0]
+    fetched_at = datetime.now(UTC)
+    rows = eastmoney_datacenter(
+        "RPT_HOLDERNUMLATEST",
+        filter_str=f'(SECURITY_CODE="{code}")',
+        page_size=page_size,
+        sort_columns="END_DATE",
+        sort_types="-1",
+        client=client,
+    )
+    records: list[ModuleRecord] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        record_date = _to_date(row.get("END_DATE")) or fetched_at.date().isoformat()
+        payload = {
+            "symbol": normalized,
+            "date": record_date,
+            "holder_num": _to_float(row.get("HOLDER_NUM")),
+            "change_num": _to_float(row.get("HOLDER_NUM_CHANGE")),
+            "change_ratio": _to_float(row.get("HOLDER_NUM_RATIO")),
+            "avg_shares": _to_float(row.get("AVG_FREE_SHARES")),
+            "source": "holder_num_change",
+        }
+        records.append(
+            ModuleRecord(
+                module="chip_liquidity",
+                source="holder_num_change",
+                data_key=f"{code}-{record_date}-{index}",
+                symbol=normalized,
+                record_date=record_date,
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(row),
+            )
+        )
+    return records
+
+
+def dividend_history(symbol: str, page_size: int = 20, client: httpx.Client | None = None) -> list[ModuleRecord]:
+    normalized = normalize_symbol(symbol)
+    code = normalized.split(".")[0]
+    fetched_at = datetime.now(UTC)
+    rows = eastmoney_datacenter(
+        "RPT_SHAREBONUS_DET",
+        filter_str=f'(SECURITY_CODE="{code}")',
+        page_size=page_size,
+        sort_columns="EX_DIVIDEND_DATE",
+        sort_types="-1",
+        client=client,
+    )
+    records: list[ModuleRecord] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        record_date = _to_date(row.get("EX_DIVIDEND_DATE") or row.get("EQUITY_RECORD_DATE")) or fetched_at.date().isoformat()
+        payload = {
+            "symbol": normalized,
+            "date": record_date,
+            "bonus_rmb": _to_float(row.get("PRETAX_BONUS_RMB")),
+            "transfer_ratio": _to_float(row.get("TRANSFER_RATIO")),
+            "bonus_ratio": _to_float(row.get("BONUS_RATIO")),
+            "plan": row.get("ASSIGN_PROGRESS"),
+            "source": "dividend_history",
+        }
+        records.append(
+            ModuleRecord(
+                module="chip_liquidity",
+                source="dividend_history",
+                data_key=f"{code}-{record_date}-{index}",
+                symbol=normalized,
+                record_date=record_date,
+                payload=payload,
+                fetched_at=fetched_at,
+                raw_payload_hash=payload_hash(row),
+            )
+        )
+    return records
+
+
 def stock_fund_flow_120d(symbol: str, client: httpx.Client | None = None) -> list[dict[str, Any]]:
     normalized = normalize_symbol(symbol)
     code, exchange = normalized.split(".")

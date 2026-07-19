@@ -265,6 +265,148 @@ def test_signals_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
         assert any(row["source"] == "eastmoney_fund_flow_minute" and row["status"] == "failed" for row in source_status)
 
 
+def test_chip_liquidity_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "chip-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_module_records(
+        [
+            ModuleRecord(
+                module="chip_liquidity",
+                source="margin_trading",
+                data_key="margin-1",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "date": "2026-07-15",
+                    "margin_balance": 1000.0,
+                    "short_balance": 20.0,
+                    "margin_short_balance": 1020.0,
+                    "source": "margin_trading",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="chip-hash-1",
+            ),
+            ModuleRecord(
+                module="chip_liquidity",
+                source="block_trade",
+                data_key="block-1",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "date": "2026-07-15",
+                    "price": 1500.0,
+                    "premium_pct": 1.5,
+                    "amount": 5000000.0,
+                    "buyer": "Mock buyer",
+                    "seller": "Mock seller",
+                    "source": "block_trade",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="chip-hash-2",
+            ),
+            ModuleRecord(
+                module="chip_liquidity",
+                source="holder_num_change",
+                data_key="holder-1",
+                symbol="600519.SH",
+                record_date="2026-07-15",
+                payload={
+                    "symbol": "600519.SH",
+                    "date": "2026-07-15",
+                    "holder_num": 100000.0,
+                    "change_ratio": -2.5,
+                    "avg_shares": 1200.0,
+                    "source": "holder_num_change",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="chip-hash-3",
+            ),
+        ]
+    )
+    repository.save_money_flow(
+        [
+            {
+                "symbol": "600519.SH",
+                "trade_date": "2026-07-15",
+                "main_net_inflow": 100.0,
+                "retail_net_inflow": -20.0,
+                "turnover_rate": 1.2,
+                "source": "stock_fund_flow_120d",
+                "raw_payload_hash": "flow-hash-1",
+            }
+        ],
+        fetched_at,
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/chip_liquidity/data?symbol=600519.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["chip_liquidity"]["sections"][0]["title"] == "Margin Financing"
+        assert payload["chip_liquidity"]["sections"][0]["cards"][0]["value"] == 1
+        assert payload["chip_liquidity"]["tables"][0]["rows"][0]["margin_balance"] == 1000.0
+        assert payload["chip_liquidity"]["tables"][4]["rows"][0]["main_net_inflow"] == 100.0
+        assert any(row["source"] == "fund_flow_backup" and row["status"] == "prepared" for row in payload["chip_liquidity"]["source_status"])
+
+
+def test_chip_liquidity_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "chip-refresh.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_margin(symbol: str) -> list[ModuleRecord]:
+        assert symbol == "600519.SH"
+        return [
+            ModuleRecord(
+                module="chip_liquidity",
+                source="margin_trading",
+                data_key="margin-1",
+                symbol=symbol,
+                record_date="2026-07-15",
+                payload={"symbol": symbol, "date": "2026-07-15", "margin_balance": 1000.0, "source": "margin_trading"},
+                fetched_at=fetched_at,
+                raw_payload_hash="chip-hash-1",
+            )
+        ]
+
+    monkeypatch.setattr("app.main.margin_trading", fake_margin)
+    monkeypatch.setattr("app.main.block_trade", lambda symbol: (_ for _ in ()).throw(AStockSourceError("block trade failed")))
+    monkeypatch.setattr("app.main.holder_num_change", lambda symbol: [])
+    monkeypatch.setattr("app.main.dividend_history", lambda symbol: [])
+    monkeypatch.setattr(
+        "app.main.stock_fund_flow_120d",
+        lambda symbol: [
+            {
+                "symbol": symbol,
+                "trade_date": "2026-07-15",
+                "main_net_inflow": 100.0,
+                "retail_net_inflow": -20.0,
+                "turnover_rate": 1.2,
+                "source": "stock_fund_flow_120d",
+                "raw_payload_hash": "flow-hash-1",
+            }
+        ],
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/chip_liquidity/refresh?symbol=600519.SH")
+        assert refresh.status_code == 200
+        payload = refresh.json()
+        assert payload["status"] == "fresh"
+        assert payload["records_written"] == 2
+        assert payload["optional_results"]["margin_trading"]["status"] == "fresh"
+        assert payload["optional_results"]["block_trade"]["status"] == "failed"
+
+        data = client.get("/api/modules/chip_liquidity/data?symbol=600519.SH")
+        assert data.status_code == 200
+        source_status = data.json()["chip_liquidity"]["source_status"]
+        assert any(row["source"] == "block_trade" and row["status"] == "failed" for row in source_status)
+
+
 def test_symbol_normalization() -> None:
     assert normalize_symbol("600519") == "600519.SH"
     assert normalize_symbol("000001") == "000001.SZ"
