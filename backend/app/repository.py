@@ -655,6 +655,7 @@ class DataRepository:
         if module is None:
             return {"module": module_id, "status": "not_found", "rows": []}
         market_payload = None
+        fundamentals_payload = None
         reports_payload = None
         signals_payload = None
         if module_id == "market":
@@ -663,6 +664,7 @@ class DataRepository:
             market_payload = self._market_layer_payload(symbol, limit)
         elif module_id == "fundamentals":
             rows = self._list_fundamentals(symbol, limit)
+            fundamentals_payload = self._fundamentals_layer_payload(symbol, limit)
         elif module_id == "announcements":
             rows = self.list_announcements(symbol, limit)
         elif module_id == "reports":
@@ -683,11 +685,187 @@ class DataRepository:
         result: dict[str, Any] = {"module": module_id, "status": status, "rows": rows}
         if market_payload is not None:
             result["market"] = market_payload
+        if fundamentals_payload is not None:
+            result["fundamentals"] = fundamentals_payload
         if reports_payload is not None:
             result["reports"] = reports_payload
         if signals_payload is not None:
             result["signals"] = signals_payload
         return result
+
+    def _fundamentals_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        fundamental_rows = self._list_fundamentals(symbol, limit)
+        module_rows = self._list_module_records("fundamentals", symbol, limit)
+        profile_rows = [
+            row
+            for row in module_rows
+            if row.get("source") == "eastmoney_stock_profile"
+            or (row.get("source") == "eastmoney_stock_info" and ("total_shares" in row or "list_date" in row))
+        ]
+        statement_rows = [row for row in module_rows if row.get("source") == "sina_financial_report"]
+        income_rows = [row for row in statement_rows if row.get("statement_type") == "lrb"]
+        balance_rows = [row for row in statement_rows if row.get("statement_type") == "fzb"]
+        cash_flow_rows = [row for row in statement_rows if row.get("statement_type") == "llb"]
+        latest_profile = profile_rows[0] if profile_rows else None
+        latest_fundamental = fundamental_rows[0] if fundamental_rows else None
+        latest_income = income_rows[0] if income_rows else None
+        latest_balance = balance_rows[0] if balance_rows else None
+        latest_cash_flow = cash_flow_rows[0] if cash_flow_rows else None
+        source_status = self._fundamentals_source_status()
+        latest_time = _latest_fetched_at(fundamental_rows + module_rows)
+        sections = [
+            {
+                "id": "company_profile",
+                "title": "Company Profile",
+                "source": "eastmoney_stock_info",
+                "fetched_at": (latest_profile or latest_fundamental or {}).get("fetched_at"),
+                "cards": [
+                    {"label": "Name", "value": (latest_profile or {}).get("name")},
+                    {"label": "Industry", "value": (latest_profile or latest_fundamental or {}).get("industry")},
+                    {"label": "Listing date", "value": (latest_profile or {}).get("list_date")},
+                    {"label": "Total shares", "value": (latest_profile or {}).get("total_shares")},
+                    {"label": "Float shares", "value": (latest_profile or {}).get("float_shares")},
+                    _source_capability_card(source_status, "eastmoney_stock_info", "Eastmoney profile"),
+                ],
+            },
+            {
+                "id": "valuation_context",
+                "title": "Valuation / Capital Context",
+                "source": "eastmoney_stock_info",
+                "fetched_at": (latest_profile or latest_fundamental or {}).get("fetched_at"),
+                "cards": [
+                    {"label": "Latest price", "value": (latest_profile or {}).get("price")},
+                    {"label": "Total market cap", "value": (latest_profile or latest_fundamental or {}).get("total_market_cap")},
+                    {"label": "Float market cap", "value": (latest_profile or {}).get("float_market_cap")},
+                    {"label": "PE TTM", "value": (latest_fundamental or {}).get("pe_ttm")},
+                    {"label": "PB", "value": (latest_fundamental or {}).get("pb")},
+                ],
+            },
+            {
+                "id": "financial_snapshot",
+                "title": "Financial Snapshot",
+                "source": "fundamentals + optional mootdx",
+                "fetched_at": (latest_fundamental or {}).get("fetched_at"),
+                "cards": [
+                    {"label": "Report period", "value": (latest_fundamental or {}).get("report_period")},
+                    {"label": "EPS", "value": (latest_fundamental or {}).get("eps")},
+                    {"label": "ROE", "value": (latest_fundamental or {}).get("roe")},
+                    {"label": "Net profit", "value": _first_present((latest_fundamental or {}).get("net_profit"), (latest_income or {}).get("net_profit"))},
+                    {"label": "Revenue", "value": _first_present((latest_fundamental or {}).get("revenue"), (latest_income or {}).get("revenue"))},
+                    _source_capability_card(source_status, "mootdx_finance", "mootdx finance snapshot"),
+                ],
+            },
+            {
+                "id": "statement_coverage",
+                "title": "Financial Statement Coverage",
+                "source": "sina_financial_report",
+                "fetched_at": _latest_fetched_at(statement_rows),
+                "cards": [
+                    {"label": "Income periods", "value": len(income_rows)},
+                    {"label": "Balance periods", "value": len(balance_rows)},
+                    {"label": "Cash-flow periods", "value": len(cash_flow_rows)},
+                    {"label": "Latest income period", "value": (latest_income or {}).get("report_period")},
+                    {"label": "Latest balance period", "value": (latest_balance or {}).get("report_period")},
+                    {"label": "Latest cash-flow period", "value": (latest_cash_flow or {}).get("report_period")},
+                    _source_capability_card(source_status, "sina_financial_report", "Sina statements"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "eastmoney_stock_info", "Eastmoney profile"),
+                    _source_capability_card(source_status, "sina_financial_report", "Sina statements"),
+                    _source_capability_card(source_status, "sina_financial_report:lrb", "Sina income"),
+                    _source_capability_card(source_status, "sina_financial_report:fzb", "Sina balance"),
+                    _source_capability_card(source_status, "sina_financial_report:llb", "Sina cash flow"),
+                    _source_capability_card(source_status, "mootdx_finance", "mootdx finance"),
+                    _source_capability_card(source_status, "mootdx_f10", "mootdx F10"),
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": [
+                self._fundamentals_table("income_statement", "Income Statement", income_rows),
+                self._fundamentals_table("balance_sheet", "Balance Sheet", balance_rows),
+                self._fundamentals_table("cash_flow", "Cash Flow", cash_flow_rows),
+                self._fundamentals_table("profile_records", "Eastmoney Profile Records", profile_rows),
+            ],
+            "source_status": source_status,
+        }
+
+    def _fundamentals_table(self, table_id: str, title: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        columns = [
+            {"key": "report_period", "label": "Report period"},
+            {"key": "revenue", "label": "Revenue"},
+            {"key": "net_profit", "label": "Net profit"},
+            {"key": "eps", "label": "EPS"},
+            {"key": "total_assets", "label": "Total assets"},
+            {"key": "total_liabilities", "label": "Total liabilities"},
+            {"key": "shareholder_equity", "label": "Equity"},
+            {"key": "operating_cash_flow", "label": "Operating cash flow"},
+            {"key": "cash_change", "label": "Cash change"},
+            {"key": "source", "label": "Source"},
+            {"key": "fetched_at", "label": "Fetched at"},
+        ]
+        if table_id == "profile_records":
+            columns = [
+                {"key": "name", "label": "Name"},
+                {"key": "industry", "label": "Industry"},
+                {"key": "list_date", "label": "Listing date"},
+                {"key": "total_shares", "label": "Total shares"},
+                {"key": "float_shares", "label": "Float shares"},
+                {"key": "total_market_cap", "label": "Total market cap"},
+                {"key": "float_market_cap", "label": "Float market cap"},
+                {"key": "source", "label": "Source"},
+                {"key": "fetched_at", "label": "Fetched at"},
+            ]
+        return {"id": table_id, "title": title, "rows": rows, "columns": columns}
+
+    def _fundamentals_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'fundamentals'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "eastmoney_stock_info": {"status": "not_collected", "last_error": None},
+            "eastmoney_stock_profile": {"status": "not_collected", "last_error": None},
+            "sina_financial_report": {"status": "not_collected", "last_error": None},
+            "sina_financial_report:lrb": {"status": "not_collected", "last_error": None},
+            "sina_financial_report:fzb": {"status": "not_collected", "last_error": None},
+            "sina_financial_report:llb": {"status": "not_collected", "last_error": None},
+            "mootdx_finance": {
+                "status": "optional_dependency_missing",
+                "last_error": "mootdx is not installed/enabled; 37-field TDX quarterly finance snapshot is unavailable.",
+            },
+            "mootdx_f10": {
+                "status": "optional_dependency_missing",
+                "last_error": "mootdx is not installed/enabled; F10 text profile categories are unavailable.",
+            },
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "fundamentals",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
 
     def _reports_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         stock_reports = self.list_reports(symbol, limit)
@@ -1314,6 +1492,13 @@ def _source_capability_card(rows: list[dict[str, Any]], source: str, label: str)
 def _latest_fetched_at(rows: list[dict[str, Any]]) -> Any:
     values = [row.get("fetched_at") for row in rows if row.get("fetched_at")]
     return max(values) if values else None
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _flatten_module_record(row: dict[str, Any]) -> dict[str, Any]:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.connectors.astock_sources import AStockSourceError, ModuleRecord
+from app.connectors.astock_sources import AStockSourceError, ModuleRecord, _normalize_sina_financial_reports
 from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
 from app.demo_data import seed_demo_data
@@ -31,6 +31,108 @@ def test_empty_api_states(tmp_path: Path) -> None:
         market = client.get("/api/modules/market/data")
         assert market.status_code == 200
         assert market.json()["status"] == "not_collected"
+
+
+def test_sina_report_list_is_normalized_by_period() -> None:
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    rows = _normalize_sina_financial_reports(
+        "600519.SH",
+        "lrb",
+        {
+            "report_list": {
+                "20260331": {
+                    "data": [
+                        {"item_title": "营业总收入", "item_value": "123.45"},
+                        {"item_title": "归属于母公司所有者的净利润", "item_value": "45.67"},
+                        {"item_title": "基本每股收益", "item_value": "3.21"},
+                    ]
+                }
+            }
+        },
+        fetched_at,
+    )
+
+    assert len(rows) == 1
+    assert rows[0].source == "sina_financial_report"
+    assert rows[0].record_date == "2026-03-31"
+    assert rows[0].payload["revenue"] == "123.45"
+    assert rows[0].payload["net_profit"] == "45.67"
+    assert rows[0].payload["eps"] == "3.21"
+
+
+def test_fundamentals_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_eastmoney_stock_info(
+        "600519.SH",
+        {
+            "name": "Kweichow Moutai",
+            "industry": "Food & Beverage",
+            "list_date": "2001-08-27",
+            "mcap": 1_800_000_000_000.0,
+            "float_mcap": 1_790_000_000_000.0,
+            "total_shares": 1_256_000_000.0,
+            "float_shares": 1_250_000_000.0,
+            "price": 1432.0,
+        },
+        fetched_at,
+    )
+    repository.save_module_records(
+        [
+            ModuleRecord(
+                module="fundamentals",
+                source="eastmoney_stock_profile",
+                data_key="600519.SH",
+                symbol="600519.SH",
+                record_date="2001-08-27",
+                payload={
+                    "symbol": "600519.SH",
+                    "name": "Kweichow Moutai",
+                    "industry": "Food & Beverage",
+                    "list_date": "2001-08-27",
+                    "total_shares": 1_256_000_000.0,
+                    "float_shares": 1_250_000_000.0,
+                    "total_market_cap": 1_800_000_000_000.0,
+                    "float_market_cap": 1_790_000_000_000.0,
+                    "price": 1432.0,
+                    "source": "eastmoney_stock_info",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="profile-hash",
+            ),
+            ModuleRecord(
+                module="fundamentals",
+                source="sina_financial_report",
+                data_key="lrb-2026-03-31",
+                symbol="600519.SH",
+                record_date="2026-03-31",
+                payload={
+                    "symbol": "600519.SH",
+                    "statement_type": "lrb",
+                    "report_period": "2026-03-31",
+                    "revenue": "123.45",
+                    "net_profit": "45.67",
+                    "eps": "3.21",
+                    "source": "sina_financial_report",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="income-hash",
+            ),
+        ]
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/fundamentals/data?symbol=600519.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        fundamentals = payload["fundamentals"]
+        assert fundamentals["sections"][0]["title"] == "Company Profile"
+        assert fundamentals["sections"][0]["cards"][0]["value"] == "Kweichow Moutai"
+        assert fundamentals["sections"][3]["cards"][0]["value"] == 1
+        assert fundamentals["tables"][0]["rows"][0]["revenue"] == "123.45"
+        assert any(row["source"] == "mootdx_f10" and row["status"] == "optional_dependency_missing" for row in fundamentals["source_status"])
 
 
 def test_seeded_search_and_overview(tmp_path: Path) -> None:

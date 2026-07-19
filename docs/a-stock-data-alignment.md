@@ -24,8 +24,8 @@
 | Signals | `industry_comparison` | Writes market-wide Eastmoney industry ranking rows into `module_records`, scoped to the current symbol context for module display. |
 | Signals | `free_stockdb_bk` | Updates Security View sector/concept mapping through the local free-stockdb `bk.get()` connector; displayed alongside Eastmoney block ownership. |
 | Chip/Liquidity | `stock_fund_flow_120d` | Writes daily fund-flow rows into `money_flow`. |
-| Fundamentals | `eastmoney_stock_info` | Updates `securities` and `fundamentals` with profile and market-cap context. |
-| Fundamentals | `sina_financial_report` | Writes statement records into `module_records`. |
+| Fundamentals | `eastmoney_stock_info` | Updates `securities` and `fundamentals`, and writes an `eastmoney_stock_profile` module record with profile, shares, listing-date and market-cap context. |
+| Fundamentals | `sina_financial_report` | Normalizes Sina `report_list` periods for income statement, balance sheet and cash-flow statement rows into `module_records`. |
 | Announcements | `cninfo_announcements` | Writes announcement titles, timestamps and detail URLs into `announcements`. |
 
 ## API Surface
@@ -33,6 +33,7 @@
 - `GET /api/connectors/capabilities` returns the full V3.4.0 function registry with `wired`, `planned`, `needs_key`, or `optional_dependency_missing`.
 - `POST /api/modules/{module}/refresh?symbol=600519.SH` triggers a module-specific read-only collection job.
 - `GET /api/modules/signals/data?symbol=600519.SH` returns both legacy `rows` and a structured `signals` payload with dynamic sections, tables, and source statuses.
+- `GET /api/modules/fundamentals/data?symbol=600519.SH` returns both legacy `rows` and a structured `fundamentals` payload with company profile, valuation/capital context, statement coverage, statement tables, and source statuses.
 - `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
 
 ## Safety

@@ -76,7 +76,7 @@ function formatYi(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "NA";
   }
-  return `${value.toLocaleString()}亿`;
+  return `${value.toLocaleString()} Yi`;
 }
 
 function formatPanelTime(value: unknown): string {
@@ -381,6 +381,135 @@ export function ModuleView({
     );
   }
 
+  if (module.id === "fundamentals") {
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">Fundamentals Layer</span>
+              <h1>Search a symbol to inspect fundamentals</h1>
+              <p>Fundamentals uses Eastmoney profile data, Sina financial statements, and explicit optional mootdx finance/F10 capability status.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve A-share symbol"
+                value={searchQuery}
+                placeholder="Search symbol or Chinese name"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const fundamentalsPayload = data?.fundamentals;
+    const fundamentalsSections = fundamentalsPayload?.sections ?? [];
+    const fundamentalsTables = fundamentalsPayload?.tables ?? [];
+    const visibleFundamentalsTables = fundamentalsTables.filter((table) => table.rows.length > 0);
+
+    return (
+      <div className="content-grid module-reports-grid module-fundamentals-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Eastmoney profile, Sina financial statements, and explicit optional mootdx finance/F10 status.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol}</span>
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading fundamentals module data...</div>}
+        {error && <EmptyState title="Fundamentals request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {fundamentalsSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {visibleFundamentalsTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(fundamentalsPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {fundamentalsSections.length === 0 && visibleFundamentalsTables.length === 0 && (
+              <EmptyState title="No fundamentals payload" detail="The fundamentals connector returned no structured sections or table rows for this symbol." />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (module.id === "reports") {
     if (!selectedSymbol) {
       return (
@@ -429,7 +558,7 @@ export function ModuleView({
         <section className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
-            <p>{module.layer} · Eastmoney reportapi company and industry reports, PDF URL metadata, optional consensus EPS and iwencai status.</p>
+            <p>{module.layer} 路 Eastmoney reportapi company and industry reports, PDF URL metadata, optional consensus EPS and iwencai status.</p>
           </div>
           <div className="security-meta">
             <span>{selectedSymbol}</span>
@@ -558,7 +687,7 @@ export function ModuleView({
         <section className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
-            <p>{module.layer} · Eastmoney block ownership, intraday fund flow, dragon-tiger records, industry rotation and explicit source boundaries.</p>
+            <p>{module.layer} 路 Eastmoney block ownership, intraday fund flow, dragon-tiger records, industry rotation and explicit source boundaries.</p>
           </div>
           <div className="security-meta">
             <span>{selectedSymbol}</span>
@@ -644,7 +773,7 @@ export function ModuleView({
       <section className="panel hero-panel">
         <div>
           <h1>{module.label}</h1>
-          <p>{module.layer} · {module.description}</p>
+          <p>{module.layer} 路 {module.description}</p>
         </div>
         <div className="security-meta">
           <span>{selectedSymbol || "All local symbols"}</span>

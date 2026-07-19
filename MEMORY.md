@@ -46,6 +46,8 @@
 - Eastmoney reportapi remains the primary reports source. Company reports use `qType=0`; industry reports use `qType=1` as a latest-page V1 feed because precise stock-to-Eastmoney-industry-code filtering is not implemented yet.
 - The Signals module now exposes a structured dark-theme `signals` payload from `/api/modules/signals/data`, with dynamic sections, Eastmoney concept/block ownership, current-symbol minute fund flow, dragon-tiger records/seats, industry ranking, and explicit source statuses.
 - Signals V1 treats Eastmoney concept blocks, Eastmoney minute fund flow, Eastmoney dragon-tiger board, Eastmoney industry comparison, and free-stockdb board mapping as wired/read-only sources. Northbound flow remains a prepared boundary because Shenzhen Connect minute disclosure became less reliable after 2024-08; 10jqka hot reason remains planned until its endpoint is revalidated.
+- The Fundamentals module now exposes a structured dark-theme `fundamentals` payload from `/api/modules/fundamentals/data`, with dynamic sections for Eastmoney profile/capital context, Sina statement coverage, statement tables, and source statuses.
+- Fundamentals V1 treats Eastmoney stock profile and Sina income/balance/cash-flow statements as wired read-only HTTP sources. mootdx finance snapshot and F10 text categories remain `optional_dependency_missing` until the dependency and TDX runtime are explicitly enabled.
 - Windows backend environments require `tzdata` for `ZoneInfo("Asia/Shanghai")`; it is now a declared backend dependency to keep tests and local runtime reproducible.
 
 ## Secrets
