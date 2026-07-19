@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from duckdb import TransactionException
 from fastapi.testclient import TestClient
 
 from app.connectors import astock_sources
@@ -32,6 +33,45 @@ def test_empty_api_states(tmp_path: Path) -> None:
         market = client.get("/api/modules/market/data")
         assert market.status_code == 200
         assert market.json()["status"] == "not_collected"
+
+
+def test_local_vite_fallback_ports_are_allowed_by_cors(tmp_path: Path) -> None:
+    db_path = tmp_path / "cors.duckdb"
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/health",
+            headers={
+                "Origin": "http://127.0.0.1:5175",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5175"
+
+
+def test_source_failure_write_retries_duckdb_transaction_conflict(monkeypatch) -> None:
+    executions: list[tuple[str, tuple[object, ...]]] = []
+    attempts = {"count": 0}
+
+    class FakeConnection:
+        def execute(self, query: str, params: tuple[object, ...]) -> None:
+            if attempts["count"] == 0:
+                attempts["count"] += 1
+                raise TransactionException("TransactionContext Error: Conflict on update!")
+            executions.append((query, params))
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.repository.connect", lambda _: FakeConnection())
+
+    DataRepository("retry.duckdb").record_source_failure("market", "free_stockdb_universe", "timeout")
+
+    assert attempts["count"] == 1
+    assert len(executions) == 2
+    assert "source_health" in executions[0][0]
+    assert "data_jobs" in executions[1][0]
 
 
 def test_seeded_search_and_overview(tmp_path: Path) -> None:

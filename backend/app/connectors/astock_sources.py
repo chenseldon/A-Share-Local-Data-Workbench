@@ -728,7 +728,7 @@ def em_zt_pool(trade_date: str, client: httpx.Client | None = None) -> list[Modu
             "seal_fund": _to_float(raw.get("fund")),
             "break_times": raw.get("zbc"),
             "industry": raw.get("hybk") or "",
-            "zt_stat": f"{stat.get('days', '?')}d{stat.get('ct', '?')}b",
+            "zt_stat": f"{stat.get('days', '?')}天{stat.get('ct', '?')}板",
         }
         record = _limit_record(source="em_zt_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
         if record:
@@ -757,7 +757,7 @@ def em_zb_pool(trade_date: str, client: httpx.Client | None = None) -> list[Modu
             "amplitude": _to_float(raw.get("zf")),
             "speed": _to_float(raw.get("zs")),
             "industry": raw.get("hybk") or "",
-            "zt_stat": f"{stat.get('days', '?')}d{stat.get('ct', '?')}b",
+            "zt_stat": f"{stat.get('days', '?')}天{stat.get('ct', '?')}板",
         }
         record = _limit_record(source="em_zb_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
         if record:
@@ -811,7 +811,7 @@ def em_yzt_pool(trade_date: str, client: httpx.Client | None = None) -> list[Mod
             "y_first_seal": _format_limit_time(raw.get("yfbt")),
             "y_limit_days": raw.get("ylbc"),
             "industry": raw.get("hybk") or "",
-            "zt_stat": f"{stat.get('days', '?')}d{stat.get('ct', '?')}b",
+            "zt_stat": f"{stat.get('days', '?')}天{stat.get('ct', '?')}板",
         }
         record = _limit_record(source="em_yzt_pool", trade_date=normalized_date, raw=raw, payload=payload, fetched_at=fetched_at)
         if record:

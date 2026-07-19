@@ -55,6 +55,10 @@
 - The ETF Options module now exposes a structured dark-theme `etf_options` payload from `/api/modules/etf_options/data`, with Sina ETF option contract chains, near-month T-quotes, Greeks/IV tables, and explicit source statuses.
 - ETF Options V1 treats Sina hq.sinajs as the read-only primary source for 50ETF, 300ETF, STAR 50 ETF and 500ETF option chains. Greeks and IV are source-provided; the app does not calculate BSM values, does not download files, and does not provide option strategy/trading execution.
 - Windows backend environments require `tzdata` for `ZoneInfo("Asia/Shanghai")`; it is now a declared backend dependency to keep tests and local runtime reproducible.
+- The integrated worktree branch combines Fundamentals, Limit-Up Board, ETF Options, and Sentiment module work. `/api/modules/{module_id}/data` can now return structured `fundamentals`, `limit_up`, `etf_options`, and `sentiment` payloads alongside the earlier module payloads.
+- Global UI defaults are now dark theme tokens. Module, System, topbar, table, empty-state, toast, progress, and fallback surfaces should render against dark backgrounds by default; Security and K-line keep their specialized dark workspace layout.
+- Limit-Up Board refresh is market/date scoped and accepts `trade_date`; it should not be treated as a normal single-symbol background refresh.
+- Local development CORS allows localhost/127.0.0.1/[::1] ports so Vite fallback ports can call the backend during UI QA without loosening access to non-local origins.
 
 ## Secrets
 - No secrets are stored in this project memory.

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import AsyncIterator
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,11 +85,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://[::1]:5173",
-        ],
+        allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|\[::1\]):\d+$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -320,13 +317,14 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     def refresh_module(
         module_id: str,
         symbol: str | None = None,
+        trade_date: str | None = None,
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:
         if module_id not in {module.id for module in MODULES}:
             raise HTTPException(status_code=404, detail=f"Unknown module: {module_id}")
         normalized_symbol = normalize_symbol(symbol) if symbol else None
         try:
-            result = _refresh_module(repository, module_id, normalized_symbol)
+            result = _refresh_module(repository, module_id, normalized_symbol, trade_date=trade_date)
         except (ValueError, MarketDataError, AStockSourceError) as exc:
             source = _default_source_for_module(module_id)
             repository.record_source_failure(module_id, source, str(exc))
@@ -361,7 +359,7 @@ def _refresh_core_modules(repository: DataRepository, symbol: str) -> dict[str, 
     return results
 
 
-def _refresh_module(repository: DataRepository, module_id: str, symbol: str | None) -> dict[str, object]:
+def _refresh_module(repository: DataRepository, module_id: str, symbol: str | None, trade_date: str | None = None) -> dict[str, object]:
     if module_id == "market":
         if not symbol:
             raise ValueError("Market refresh requires a symbol.")
@@ -567,10 +565,10 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
         }
 
     if module_id == "limit_up":
-        selected_date = datetime.now(UTC).date().strftime("%Y%m%d")
+        selected_date = _normalize_limit_trade_date(trade_date)
         records_written = 0
         optional_results: dict[str, object] = {}
-        fetched_records: dict[str, list[object]] = {}
+        fetched_records: dict[str, list] = {}
         fetchers = (
             ("em_zt_pool", lambda: em_zt_pool(selected_date)),
             ("em_zb_pool", lambda: em_zb_pool(selected_date)),
@@ -588,14 +586,15 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
                 records_written += written
                 optional_results[source] = {"status": "fresh", "records_written": written}
             except AStockSourceError as exc:
+                fetched_records[source] = []
                 repository.record_source_failure("limit_up", source, str(exc))
                 optional_results[source] = {"status": "failed", "error": str(exc)}
         sentiment = limit_up_sentiment(
             selected_date,
-            fetched_records.get("em_zt_pool", []),  # type: ignore[arg-type]
-            fetched_records.get("em_zb_pool", []),  # type: ignore[arg-type]
-            fetched_records.get("em_dt_pool", []),  # type: ignore[arg-type]
-            fetched_records.get("em_yzt_pool", []),  # type: ignore[arg-type]
+            fetched_records.get("em_zt_pool", []),
+            fetched_records.get("em_zb_pool", []),
+            fetched_records.get("em_dt_pool", []),
+            fetched_records.get("em_yzt_pool", []),
         )
         sentiment_written = repository.save_module_records([sentiment])
         records_written += sentiment_written
@@ -603,6 +602,8 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
         status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
         return {
             "module": module_id,
+            "symbol": symbol,
+            "trade_date": selected_date,
             "status": status,
             "records_written": records_written,
             "optional_results": optional_results,
@@ -652,6 +653,17 @@ def _default_source_for_module(module_id: str) -> str:
         "limit_up": "em_zt_pool",
         "etf_options": "sina_option_codes",
     }.get(module_id, "not_configured")
+
+
+def _normalize_limit_trade_date(value: str | None) -> str:
+    if not value:
+        return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    text = value.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text.replace("-", "")
+    if re.fullmatch(r"\d{8}", text):
+        return text
+    raise ValueError("trade_date must use YYYYMMDD or YYYY-MM-DD.")
 
 
 def _parse_indicators(value: str | None) -> tuple[str, ...]:

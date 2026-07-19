@@ -3,10 +3,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from duckdb import TransactionException
 
 from .database import connect, initialize_database
 from .connectors.astock_sources import ModuleRecord, payload_hash
@@ -426,26 +429,33 @@ class DataRepository:
 
     def record_source_failure(self, module: str, source: str, error_message: str) -> None:
         now = datetime.now(UTC)
-        connection = connect(self.db_path)
-        try:
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO source_health
-                (source, module, status, last_success_at, last_failure_at, last_error, updated_at)
-                VALUES (?, ?, 'failed', NULL, ?, ?, ?)
-                """,
-                (source, module, now, error_message[:500], now),
-            )
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO data_jobs
-                (id, job_type, module, source, status, started_at, finished_at, records_written, error_message)
-                VALUES (?, 'refresh', ?, ?, 'failed', ?, ?, 0, ?)
-                """,
-                (str(uuid4()), module, source, now, now, error_message[:500]),
-            )
-        finally:
-            connection.close()
+        job_id = str(uuid4())
+        for attempt in range(3):
+            connection = connect(self.db_path)
+            try:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO source_health
+                    (source, module, status, last_success_at, last_failure_at, last_error, updated_at)
+                    VALUES (?, ?, 'failed', NULL, ?, ?, ?)
+                    """,
+                    (source, module, now, error_message[:500], now),
+                )
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO data_jobs
+                    (id, job_type, module, source, status, started_at, finished_at, records_written, error_message)
+                    VALUES (?, 'refresh', ?, ?, 'failed', ?, ?, 0, ?)
+                    """,
+                    (job_id, module, source, now, now, error_message[:500]),
+                )
+                return
+            except TransactionException:
+                if attempt == 2:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+            finally:
+                connection.close()
 
     def search_securities(self, query: str = "", limit: int = 20) -> list[dict[str, Any]]:
         pattern = f"%{query.strip()}%"
