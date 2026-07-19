@@ -94,11 +94,11 @@ export const fallbackModules: ModuleDefinition[] = [
     label: "ETF Options",
     layer: "期权层",
     description: "ETF option chains, T-quotes, Greeks and implied volatility.",
-    status: "not_configured",
-    tables: [],
+    status: "configured",
+    tables: ["module_records"],
     sources: ["Sina hq.sinajs"],
     planned_fields: ["option chain", "T quote", "Delta", "Gamma", "Theta", "Vega", "IV"],
-    capabilities: { planned: 3 }
+    capabilities: { wired: 3 }
   },
   {
     id: "sentiment",

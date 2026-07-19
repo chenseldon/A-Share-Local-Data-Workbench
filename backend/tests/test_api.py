@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.connectors import astock_sources
 from app.connectors.astock_sources import AStockSourceError, ModuleRecord
 from app.connectors.public_market import BoardMapping, MarketBar, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
 from app.database import initialize_database
@@ -198,6 +199,195 @@ def test_announcements_refresh_records_empty_success(tmp_path: Path, monkeypatch
         assert data.status_code == 200
         source_status = data.json()["announcements"]["source_status"]
         assert any(row["source"] == "cninfo_announcements" and row["status"] == "fresh" for row in source_status)
+
+
+def test_sina_option_parsers_handle_quote_and_greeks(monkeypatch) -> None:
+    quote_values = [""] * 43
+    quote_values[0] = "10"
+    quote_values[1] = "0.100"
+    quote_values[2] = "0.120"
+    quote_values[3] = "0.130"
+    quote_values[4] = "12"
+    quote_values[5] = "1000"
+    quote_values[6] = "2.5"
+    quote_values[7] = "3.000"
+    quote_values[8] = "0.117"
+    quote_values[9] = "0.118"
+    quote_values[10] = "0.500"
+    quote_values[11] = "0.001"
+    quote_values[37] = "50ETF购7月3000"
+    quote_values[38] = "12.3"
+    quote_values[39] = "0.140"
+    quote_values[40] = "0.110"
+    quote_values[41] = "200"
+    quote_values[42] = "300000"
+    greeks_raw = [
+        "50ETF购7月3000",
+        "",
+        "",
+        "",
+        "200",
+        "0.51",
+        "0.12",
+        "-0.03",
+        "0.08",
+        "0.1735",
+        "0.16",
+        "0.09",
+        "10005001",
+        "3.000",
+        "0.120",
+        "0.118",
+    ]
+
+    def fake_list(param: str, client=None) -> list[str]:
+        if param.startswith("CON_OP_"):
+            return quote_values
+        if param.startswith("CON_SO_"):
+            return greeks_raw
+        return []
+
+    monkeypatch.setattr(astock_sources, "_sina_option_list", fake_list)
+    quote = astock_sources.sina_option_tquote("10005001")
+    greeks = astock_sources.sina_option_greeks("10005001")
+    assert quote["name"] == "50ETF购7月3000"
+    assert quote["strike"] == 3.0
+    assert quote["amount"] == 300000.0
+    assert greeks["delta"] == 0.51
+    assert greeks["iv"] == 0.1735
+    assert greeks["trade_code"] == "10005001"
+
+
+def test_sina_option_codes_parse_contract_months(monkeypatch) -> None:
+    class FakeResponse:
+        def json(self) -> dict[str, object]:
+            return {"result": {"data": {"contractMonth": ["2026-07", "2026-08"]}}}
+
+    monkeypatch.setattr(astock_sources, "_sina_option_get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        astock_sources,
+        "_sina_option_list",
+        lambda param, client=None: ["CON_OP_10005001", "CON_OP_10005002"] if "2607" in param else ["CON_OP_10005003"],
+    )
+    codes = astock_sources.sina_option_codes("510050", call=True)
+    assert codes["2607"] == ["10005001", "10005002"]
+    assert codes["2608"] == ["10005003"]
+
+
+def test_etf_options_module_data_returns_structured_payload(tmp_path: Path) -> None:
+    db_path = tmp_path / "etf-options-payload.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    repository = DataRepository(db_path)
+    initialize_database(db_path)
+    repository.save_module_records(
+        [
+            ModuleRecord(
+                module="etf_options",
+                source="sina_option_codes",
+                data_key="510050-call-2607-10005001",
+                symbol="510050.SH",
+                record_date="2026-07-15",
+                payload={
+                    "underlying": "510050.SH",
+                    "underlying_code": "510050",
+                    "underlying_name": "50ETF",
+                    "month": "2607",
+                    "side": "call",
+                    "contract_code": "10005001",
+                    "rank": 1,
+                    "source": "sina_option_codes",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-1",
+            ),
+            ModuleRecord(
+                module="etf_options",
+                source="sina_option_tquote",
+                data_key="510050-call-2607-10005001",
+                symbol="510050.SH",
+                record_date="2026-07-15",
+                payload={
+                    "underlying": "510050.SH",
+                    "month": "2607",
+                    "side": "call",
+                    "contract_code": "10005001",
+                    "name": "50ETF购7月3000",
+                    "strike": 3.0,
+                    "last": 0.12,
+                    "open_interest": 1000,
+                    "source": "sina_option_tquote",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-2",
+            ),
+            ModuleRecord(
+                module="etf_options",
+                source="sina_option_greeks",
+                data_key="510050-call-2607-10005001",
+                symbol="510050.SH",
+                record_date="2026-07-15",
+                payload={
+                    "underlying": "510050.SH",
+                    "month": "2607",
+                    "side": "call",
+                    "contract_code": "10005001",
+                    "delta": 0.51,
+                    "gamma": 0.12,
+                    "theta": -0.03,
+                    "vega": 0.08,
+                    "iv": 0.1735,
+                    "theory": 0.118,
+                    "source": "sina_option_greeks",
+                },
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-3",
+            ),
+        ]
+    )
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/etf_options/data?symbol=510050.SH")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["etf_options"]["sections"][0]["title"] == "Underlying Snapshot"
+        assert payload["etf_options"]["sections"][0]["cards"][1]["value"] == "50ETF"
+        assert payload["etf_options"]["tables"][0]["rows"][0]["contract_code"] == "10005001"
+        assert payload["etf_options"]["tables"][2]["rows"][0]["last"] == 0.12
+        assert payload["etf_options"]["tables"][3]["rows"][0]["iv"] == 0.1735
+        assert any(row["source"] == "sina_option_tquote" and row["status"] == "fresh" for row in payload["etf_options"]["source_status"])
+
+
+def test_etf_options_refresh_uses_connector_and_cache(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "etf-options-refresh.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+
+    def fake_records(symbol: str | None = None) -> list[ModuleRecord]:
+        assert symbol == "510050.SH"
+        return [
+            ModuleRecord(
+                module="etf_options",
+                source="sina_option_codes",
+                data_key="510050-call-2607-10005001",
+                symbol="510050.SH",
+                record_date="2026-07-15",
+                payload={"underlying": "510050.SH", "month": "2607", "side": "call", "contract_code": "10005001", "source": "sina_option_codes"},
+                fetched_at=fetched_at,
+                raw_payload_hash="hash-1",
+            )
+        ]
+
+    monkeypatch.setattr("app.main.sina_etf_option_records", fake_records)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/etf_options/refresh?symbol=510050.SH")
+        assert refresh.status_code == 200
+        assert refresh.json()["records_written"] == 1
+        assert refresh.json()["optional_results"]["sina_option_codes"]["status"] == "fresh"
+
+        data = client.get("/api/modules/etf_options/data?symbol=510050.SH")
+        assert data.status_code == 200
+        assert data.json()["etf_options"]["tables"][0]["rows"][0]["contract_code"] == "10005001"
 
 
 def test_signals_module_data_returns_structured_payload(tmp_path: Path) -> None:

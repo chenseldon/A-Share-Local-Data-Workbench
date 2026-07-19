@@ -52,6 +52,8 @@
 - Announcements V1 treats CNINFO full-text disclosure search as the wired primary source with dynamic `orgId` lookup. mootdx F10 latest tips remains `optional_dependency_missing`; the `a-stock-data` backup route (SZSE official for Shenzhen tickers, Eastmoney PDF announcements for Shanghai tickers) is registered as `prepared` but is not used as the default source.
 - The Chip/Liquidity module now exposes a structured dark-theme `chip_liquidity` payload from `/api/modules/chip_liquidity/data`, with dynamic sections for margin financing, block trades, holder count/chip concentration, dividends, 120-day fund flow, and explicit source statuses.
 - Chip/Liquidity V1 treats Eastmoney datacenter margin trading, block trades, holder count, dividend history, and Eastmoney push2his 120-day fund flow as wired/read-only sources. Sina fund-flow backup is prepared but not wired. Eastmoney datacenter/push2his can be IP-throttled, so source failures must be displayed without pretending data is current.
+- The ETF Options module now exposes a structured dark-theme `etf_options` payload from `/api/modules/etf_options/data`, with Sina ETF option contract chains, near-month T-quotes, Greeks/IV tables, and explicit source statuses.
+- ETF Options V1 treats Sina hq.sinajs as the read-only primary source for 50ETF, 300ETF, STAR 50 ETF and 500ETF option chains. Greeks and IV are source-provided; the app does not calculate BSM values, does not download files, and does not provide option strategy/trading execution.
 - Windows backend environments require `tzdata` for `ZoneInfo("Asia/Shanghai")`; it is now a declared backend dependency to keep tests and local runtime reproducible.
 
 ## Secrets

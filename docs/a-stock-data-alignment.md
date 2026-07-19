@@ -8,7 +8,7 @@
 - Eastmoney: used for reportapi, stock profile, concept ownership and fund-flow endpoints. Calls go through a throttled helper.
 - News: Eastmoney stock news and global 7x24 news are used alongside CLS telegraphs as mutually backed read-only news context. CLS signing is calculated locally and does not require a key.
 - CNINFO: used for announcement search with dynamic `orgId` lookup and fallback rules.
-- Sina: used for financial-statement records through the open API endpoint.
+- Sina: used for financial-statement records through the open API endpoint and ETF option chains/T-quotes/Greeks through `hq.sinajs`.
 - iwencai: registered as `needs_key`; it is disabled unless `IWENCAI_API_KEY` is configured.
 
 ## Wired Functions
@@ -37,6 +37,9 @@
 | Announcements | `cninfo_announcements` | Writes CNINFO announcement titles, timestamps and detail URLs into `announcements`, using dynamic `orgId` lookup with fallback rules. |
 | Announcements | `mootdx_f10_latest` | Tracked as an optional F10 latest-announcement summary capability; not enabled unless `mootdx` is installed and configured. |
 | Announcements | `announcements_backup` | Registered as a prepared backup route from `a-stock-data`: SZSE official announcements for Shenzhen tickers and Eastmoney announcement PDFs for Shanghai tickers. |
+| ETF Options | `sina_option_codes` | Writes ETF option contract chains into `module_records` for 50ETF, 300ETF, STAR 50 ETF and 500ETF underlyings. |
+| ETF Options | `sina_option_tquote` | Writes near-month option T-quotes into `module_records`, including bid/ask, last, strike, open interest, volume and amount. |
+| ETF Options | `sina_option_greeks` | Writes source-provided Greeks and implied volatility into `module_records`; the app does not calculate local BSM values. |
 
 ## API Surface
 
@@ -46,6 +49,7 @@
 - `GET /api/modules/news/data?symbol=600519.SH` returns both legacy `rows` and a structured `news` payload with stock news, CLS telegraphs, global news and source statuses. Market-wide news remains visible inside a symbol-scoped News view.
 - `GET /api/modules/chip_liquidity/data?symbol=600519.SH` returns both legacy `rows` and a structured `chip_liquidity` payload with dynamic sections, tables, and source statuses.
 - `GET /api/modules/announcements/data?symbol=600519.SH` returns both legacy `rows` and a structured `announcements` payload with CNINFO sections, announcement tables, optional mootdx F10 status and backup-route status.
+- `GET /api/modules/etf_options/data?symbol=510050.SH` returns both legacy `rows` and a structured `etf_options` payload with option-chain sections, T-quote tables, Greeks/IV tables and source statuses.
 - `POST /api/security/{symbol}/refresh` refreshes market data by default. Passing `include_modules=true` also attempts fundamentals, reports, announcements, signals and fund flow; non-market failures are recorded in `source_health` and returned in `module_results`.
 
 ## Safety

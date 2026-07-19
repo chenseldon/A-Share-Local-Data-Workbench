@@ -198,6 +198,7 @@ export interface ModuleDataResponse {
   signals?: SignalsModuleData;
   news?: NewsModuleData;
   chip_liquidity?: ChipLiquidityModuleData;
+  etf_options?: EtfOptionsModuleData;
 }
 
 export interface MarketModuleSection {
@@ -285,6 +286,13 @@ export interface NewsModuleData {
 }
 
 export interface ChipLiquidityModuleData {
+  symbol: string | null;
+  sections: ReportModuleSection[];
+  tables: ReportModuleTable[];
+  source_status: MarketSourceStatus[];
+}
+
+export interface EtfOptionsModuleData {
   symbol: string | null;
   sections: ReportModuleSection[];
   tables: ReportModuleTable[];

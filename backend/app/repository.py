@@ -745,6 +745,7 @@ class DataRepository:
         signals_payload = None
         news_payload = None
         chip_liquidity_payload = None
+        etf_options_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
             rows = ([quote] if quote else []) + self._list_market_bars(symbol, limit)
@@ -768,7 +769,10 @@ class DataRepository:
             news_payload = self._news_layer_payload(symbol, limit)
         elif module_id == "limit_up":
             rows = self._list_limit_up(symbol, limit)
-        elif module_id in {"etf_options", "sentiment"}:
+        elif module_id == "etf_options":
+            rows = self._list_module_records("etf_options", symbol, limit)
+            etf_options_payload = self._etf_options_layer_payload(symbol, limit)
+        elif module_id == "sentiment":
             rows = self._list_module_records(module_id, symbol, limit)
         else:
             rows = []
@@ -786,6 +790,8 @@ class DataRepository:
             result["news"] = news_payload
         if chip_liquidity_payload is not None:
             result["chip_liquidity"] = chip_liquidity_payload
+        if etf_options_payload is not None:
+            result["etf_options"] = etf_options_payload
         return result
 
     def _news_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
@@ -1247,6 +1253,197 @@ class DataRepository:
                     {
                         "source": source,
                         "module": "signals",
+                        "status": value["status"],
+                        "last_success_at": None,
+                        "last_failure_at": None,
+                        "last_error": value["last_error"],
+                        "updated_at": None,
+                    }
+                )
+        return rows
+
+    def _etf_options_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
+        rows = self._list_module_records("etf_options", symbol, limit)
+        contract_rows = [row for row in rows if row.get("source") == "sina_option_codes"]
+        quote_rows = [row for row in rows if row.get("source") == "sina_option_tquote"]
+        greek_rows = [row for row in rows if row.get("source") == "sina_option_greeks"]
+        call_contracts = [row for row in contract_rows if row.get("side") == "call"]
+        put_contracts = [row for row in contract_rows if row.get("side") == "put"]
+        call_quotes = [row for row in quote_rows if row.get("side") == "call"]
+        put_quotes = [row for row in quote_rows if row.get("side") == "put"]
+        latest_quote = quote_rows[0] if quote_rows else None
+        latest_greek = greek_rows[0] if greek_rows else None
+        months = sorted({str(row.get("month")) for row in contract_rows if row.get("month")})
+        source_status = self._etf_options_source_status()
+        latest_time = _latest_fetched_at(rows)
+        sections = [
+            {
+                "id": "underlying_snapshot",
+                "title": "Underlying Snapshot",
+                "source": "sina_option_codes",
+                "fetched_at": _latest_fetched_at(contract_rows),
+                "cards": [
+                    {"label": "Underlying", "value": symbol.upper() if symbol else (contract_rows[0].get("underlying") if contract_rows else "510050.SH")},
+                    {"label": "Name", "value": contract_rows[0].get("underlying_name") if contract_rows else None},
+                    {"label": "Months", "value": len(months)},
+                    {"label": "Call contracts", "value": len(call_contracts)},
+                    {"label": "Put contracts", "value": len(put_contracts)},
+                    _source_capability_card(source_status, "sina_option_codes", "Contract list"),
+                ],
+            },
+            {
+                "id": "contract_chain",
+                "title": "Contract Chain",
+                "source": "sina_option_codes",
+                "fetched_at": _latest_fetched_at(contract_rows),
+                "cards": [
+                    {"label": "Total contracts", "value": len(contract_rows)},
+                    {"label": "Nearest month", "value": months[0] if months else None},
+                    {"label": "Quoted calls", "value": len(call_quotes)},
+                    {"label": "Quoted puts", "value": len(put_quotes)},
+                    _source_capability_card(source_status, "sina_option_tquote", "T quote"),
+                ],
+            },
+            {
+                "id": "near_money_snapshot",
+                "title": "ATM / Near-Money Snapshot",
+                "source": "sina_option_tquote",
+                "fetched_at": _latest_fetched_at(quote_rows),
+                "cards": [
+                    {"label": "Sample contract", "value": latest_quote.get("contract_code") if latest_quote else None},
+                    {"label": "Name", "value": latest_quote.get("name") if latest_quote else None},
+                    {"label": "Strike", "value": latest_quote.get("strike") if latest_quote else None},
+                    {"label": "Last", "value": latest_quote.get("last") if latest_quote else None},
+                    {"label": "Open interest", "value": latest_quote.get("open_interest") if latest_quote else None},
+                    {"label": "Pct", "value": latest_quote.get("pct") if latest_quote else None},
+                ],
+            },
+            {
+                "id": "greeks_iv_coverage",
+                "title": "Greeks / IV Coverage",
+                "source": "sina_option_greeks",
+                "fetched_at": _latest_fetched_at(greek_rows),
+                "cards": [
+                    {"label": "Greeks rows", "value": len(greek_rows)},
+                    {"label": "Delta", "value": latest_greek.get("delta") if latest_greek else None},
+                    {"label": "Gamma", "value": latest_greek.get("gamma") if latest_greek else None},
+                    {"label": "Theta", "value": latest_greek.get("theta") if latest_greek else None},
+                    {"label": "Vega", "value": latest_greek.get("vega") if latest_greek else None},
+                    {"label": "IV", "value": latest_greek.get("iv") if latest_greek else None},
+                    _source_capability_card(source_status, "sina_option_greeks", "Greeks + IV"),
+                ],
+            },
+            {
+                "id": "source_capabilities",
+                "title": "Source Capabilities",
+                "source": "connector_registry",
+                "fetched_at": latest_time,
+                "cards": [
+                    _source_capability_card(source_status, "sina_option_codes", "Contract list"),
+                    _source_capability_card(source_status, "sina_option_tquote", "T quote"),
+                    _source_capability_card(source_status, "sina_option_greeks", "Greeks + IV"),
+                ],
+            },
+        ]
+        tables = [
+            {
+                "id": "call_contracts",
+                "title": "Call Contracts",
+                "rows": call_contracts,
+                "columns": [
+                    {"key": "month", "label": "Month"},
+                    {"key": "contract_code", "label": "Contract"},
+                    {"key": "rank", "label": "Rank"},
+                    {"key": "underlying", "label": "Underlying"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "put_contracts",
+                "title": "Put Contracts",
+                "rows": put_contracts,
+                "columns": [
+                    {"key": "month", "label": "Month"},
+                    {"key": "contract_code", "label": "Contract"},
+                    {"key": "rank", "label": "Rank"},
+                    {"key": "underlying", "label": "Underlying"},
+                    {"key": "source", "label": "Source"},
+                    {"key": "fetched_at", "label": "Fetched at"},
+                ],
+            },
+            {
+                "id": "t_quotes",
+                "title": "T Quotes",
+                "rows": quote_rows,
+                "columns": [
+                    {"key": "month", "label": "Month"},
+                    {"key": "side", "label": "Side"},
+                    {"key": "contract_code", "label": "Contract"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "strike", "label": "Strike"},
+                    {"key": "bid", "label": "Bid"},
+                    {"key": "bid_vol", "label": "Bid vol"},
+                    {"key": "last", "label": "Last"},
+                    {"key": "ask", "label": "Ask"},
+                    {"key": "ask_vol", "label": "Ask vol"},
+                    {"key": "open_interest", "label": "Open interest"},
+                    {"key": "volume", "label": "Volume"},
+                    {"key": "amount", "label": "Amount"},
+                    {"key": "pct", "label": "Pct"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+            {
+                "id": "greeks_iv",
+                "title": "Greeks And IV",
+                "rows": greek_rows,
+                "columns": [
+                    {"key": "month", "label": "Month"},
+                    {"key": "side", "label": "Side"},
+                    {"key": "contract_code", "label": "Contract"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "strike", "label": "Strike"},
+                    {"key": "delta", "label": "Delta"},
+                    {"key": "gamma", "label": "Gamma"},
+                    {"key": "theta", "label": "Theta"},
+                    {"key": "vega", "label": "Vega"},
+                    {"key": "iv", "label": "IV"},
+                    {"key": "theory", "label": "Theory"},
+                    {"key": "last", "label": "Last"},
+                    {"key": "trade_code", "label": "Trade code"},
+                    {"key": "source", "label": "Source"},
+                ],
+            },
+        ]
+        return {
+            "symbol": symbol.upper() if symbol else None,
+            "sections": sections,
+            "tables": tables,
+            "source_status": source_status,
+        }
+
+    def _etf_options_source_status(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """
+            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
+            FROM source_health
+            WHERE module = 'etf_options'
+            ORDER BY source
+            """
+        )
+        by_source = {str(row["source"]): row for row in rows}
+        defaults = {
+            "sina_option_codes": {"status": "not_collected", "last_error": None},
+            "sina_option_tquote": {"status": "not_collected", "last_error": None},
+            "sina_option_greeks": {"status": "not_collected", "last_error": None},
+        }
+        for source, value in defaults.items():
+            if source not in by_source:
+                rows.append(
+                    {
+                        "source": source,
+                        "module": "etf_options",
                         "status": value["status"],
                         "last_success_at": None,
                         "last_failure_at": None,

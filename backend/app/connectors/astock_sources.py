@@ -19,6 +19,13 @@ PDF_TPL = "https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf"
 EM_MIN_INTERVAL = 1.0
 _last_em_call = 0.0
 _cninfo_orgid_map: dict[str, str] = {}
+SINA_OPTION_HEADERS = {"Referer": "https://stock.finance.sina.com.cn/"}
+SINA_OPTION_UNDERLYINGS = {
+    "510050": "50ETF",
+    "510300": "300ETF",
+    "588000": "科创50ETF",
+    "510500": "500ETF",
+}
 
 
 class AStockSourceError(RuntimeError):
@@ -94,6 +101,229 @@ def _to_date(value: Any) -> str | None:
     if re.fullmatch(r"\d{8}", text):
         return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
     return text[:10]
+
+
+def _sina_option_get(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    timeout: float = 12.0,
+    client: httpx.Client | None = None,
+) -> httpx.Response:
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=timeout)
+    try:
+        response = http_client.get(url, params=params, headers={"User-Agent": UA, **SINA_OPTION_HEADERS}, timeout=timeout)
+        response.raise_for_status()
+        return response
+    except httpx.HTTPError as exc:
+        raise AStockSourceError(f"Sina option request failed: {exc}") from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+
+def _sina_option_list(param: str, client: httpx.Client | None = None) -> list[str]:
+    response = _sina_option_get(f"https://hq.sinajs.cn/list={param}", client=client)
+    text = response.content.decode("gbk", errors="replace")
+    return text.split('"')[1].split(",") if '"' in text else []
+
+
+def _option_float(value: Any) -> float | None:
+    number = _to_float(value)
+    return number if number is not None else None
+
+
+def option_underlying_code(symbol: str | None = None) -> str:
+    if not symbol:
+        return "510050"
+    code = normalize_symbol(symbol).split(".")[0]
+    return code if code in SINA_OPTION_UNDERLYINGS else "510050"
+
+
+def sina_option_codes(
+    underlying: str = "510050",
+    call: bool = True,
+    client: httpx.Client | None = None,
+) -> dict[str, list[str]]:
+    code = option_underlying_code(underlying)
+    cate = SINA_OPTION_UNDERLYINGS[code]
+    response = _sina_option_get(
+        "https://stock.finance.sina.com.cn/futures/api/openapi.php/StockOptionService.getStockName",
+        params={"exchange": "null", "cate": cate},
+        client=client,
+    )
+    try:
+        months_raw = response.json()["result"]["data"]["contractMonth"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AStockSourceError("Sina option contract months response schema changed.") from exc
+    months: list[str] = []
+    for value in months_raw or []:
+        text = str(value)
+        if re.fullmatch(r"\d{4}-\d{2}", text):
+            months.append(text.replace("-", "")[2:])
+        elif re.fullmatch(r"\d{4}", text):
+            months.append(text)
+    flag = "OP_UP_" if call else "OP_DOWN_"
+    contracts: dict[str, list[str]] = {}
+    for month in months:
+        codes = [
+            item.replace("CON_OP_", "")
+            for item in _sina_option_list(f"{flag}{code}{month}", client=client)
+            if item.startswith("CON_OP_")
+        ]
+        if codes:
+            contracts[month] = codes
+    return contracts
+
+
+def sina_option_tquote(code: str, client: httpx.Client | None = None) -> dict[str, Any]:
+    values = _sina_option_list(f"CON_OP_{code}", client=client)
+    if len(values) < 43:
+        raise AStockSourceError(f"Sina option T-quote returned {len(values)} fields for {code}.")
+    return {
+        "contract_code": code,
+        "bid_vol": _option_float(values[0]),
+        "bid": _option_float(values[1]),
+        "last": _option_float(values[2]),
+        "ask": _option_float(values[3]),
+        "ask_vol": _option_float(values[4]),
+        "open_interest": _option_float(values[5]),
+        "pct": _option_float(values[6]),
+        "strike": _option_float(values[7]),
+        "prev_close": _option_float(values[8]),
+        "open": _option_float(values[9]),
+        "limit_up": _option_float(values[10]),
+        "limit_down": _option_float(values[11]),
+        "name": values[37],
+        "amplitude": _option_float(values[38]),
+        "high": _option_float(values[39]),
+        "low": _option_float(values[40]),
+        "volume": _option_float(values[41]),
+        "amount": _option_float(values[42]),
+    }
+
+
+def sina_option_greeks(code: str, client: httpx.Client | None = None) -> dict[str, Any]:
+    raw = _sina_option_list(f"CON_SO_{code}", client=client)
+    if len(raw) < 16:
+        raise AStockSourceError(f"Sina option Greeks returned {len(raw)} fields for {code}.")
+    values = [raw[0]] + raw[4:]
+    if len(values) < 13:
+        raise AStockSourceError(f"Sina option Greeks normalized field count is too short for {code}.")
+    return {
+        "contract_code": code,
+        "name": values[0],
+        "volume": _option_float(values[1]),
+        "delta": _option_float(values[2]),
+        "gamma": _option_float(values[3]),
+        "theta": _option_float(values[4]),
+        "vega": _option_float(values[5]),
+        "iv": _option_float(values[6]),
+        "high": _option_float(values[7]),
+        "low": _option_float(values[8]),
+        "trade_code": values[9],
+        "strike": _option_float(values[10]),
+        "last": _option_float(values[11]),
+        "theory": _option_float(values[12]),
+    }
+
+
+def sina_etf_option_records(
+    symbol: str | None = None,
+    *,
+    max_contracts_per_side: int = 40,
+    client: httpx.Client | None = None,
+) -> list[ModuleRecord]:
+    underlying = option_underlying_code(symbol)
+    normalized_symbol = f"{underlying}.SH"
+    fetched_at = datetime.now(UTC)
+    records: list[ModuleRecord] = []
+    contract_maps: dict[str, dict[str, list[str]]] = {}
+    for side, is_call in (("call", True), ("put", False)):
+        contracts = sina_option_codes(underlying, call=is_call, client=client)
+        contract_maps[side] = contracts
+        for month, codes in contracts.items():
+            for index, contract_code in enumerate(codes):
+                payload = {
+                    "underlying": normalized_symbol,
+                    "underlying_code": underlying,
+                    "underlying_name": SINA_OPTION_UNDERLYINGS[underlying],
+                    "month": month,
+                    "side": side,
+                    "contract_code": contract_code,
+                    "rank": index + 1,
+                    "source": "sina_option_codes",
+                }
+                records.append(
+                    ModuleRecord(
+                        module="etf_options",
+                        source="sina_option_codes",
+                        data_key=f"{underlying}-{side}-{month}-{contract_code}",
+                        symbol=normalized_symbol,
+                        record_date=fetched_at.date().isoformat(),
+                        payload=payload,
+                        fetched_at=fetched_at,
+                        raw_payload_hash=payload_hash(payload),
+                    )
+                )
+
+    near_codes: list[tuple[str, str, str]] = []
+    for side, contracts in contract_maps.items():
+        near_month = sorted(contracts)[0] if contracts else None
+        if not near_month:
+            continue
+        for contract_code in contracts[near_month][:max_contracts_per_side]:
+            near_codes.append((side, near_month, contract_code))
+
+    for side, month, contract_code in near_codes:
+        try:
+            quote = {
+                **sina_option_tquote(contract_code, client=client),
+                "underlying": normalized_symbol,
+                "underlying_code": underlying,
+                "month": month,
+                "side": side,
+                "source": "sina_option_tquote",
+            }
+            records.append(
+                ModuleRecord(
+                    module="etf_options",
+                    source="sina_option_tquote",
+                    data_key=f"{underlying}-{side}-{month}-{contract_code}",
+                    symbol=normalized_symbol,
+                    record_date=fetched_at.date().isoformat(),
+                    payload=quote,
+                    fetched_at=fetched_at,
+                    raw_payload_hash=payload_hash(quote),
+                )
+            )
+        except AStockSourceError:
+            continue
+        try:
+            greeks = {
+                **sina_option_greeks(contract_code, client=client),
+                "underlying": normalized_symbol,
+                "underlying_code": underlying,
+                "month": month,
+                "side": side,
+                "source": "sina_option_greeks",
+            }
+            records.append(
+                ModuleRecord(
+                    module="etf_options",
+                    source="sina_option_greeks",
+                    data_key=f"{underlying}-{side}-{month}-{contract_code}",
+                    symbol=normalized_symbol,
+                    record_date=fetched_at.date().isoformat(),
+                    payload=greeks,
+                    fetched_at=fetched_at,
+                    raw_payload_hash=payload_hash(greeks),
+                )
+            )
+        except AStockSourceError:
+            continue
+    return records
 
 
 def eastmoney_reports(symbol: str, max_pages: int = 1, client: httpx.Client | None = None) -> list[dict[str, Any]]:

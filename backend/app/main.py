@@ -26,6 +26,7 @@ from .connectors.astock_sources import (
     margin_trading,
     normalize_eastmoney_industry_report,
     normalize_eastmoney_report,
+    sina_etf_option_records,
     sina_financial_report,
     stock_fund_flow_120d,
 )
@@ -520,6 +521,34 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             "optional_results": optional_results,
         }
 
+    if module_id == "etf_options":
+        option_symbol = symbol or "510050.SH"
+        records = sina_etf_option_records(option_symbol)
+        records_written = repository.save_module_records(records)
+        if not records:
+            repository.record_source_success("etf_options", "sina_option_codes", 0)
+        source_counts = {
+            source: len([record for record in records if record.source == source])
+            for source in ("sina_option_codes", "sina_option_tquote", "sina_option_greeks")
+        }
+        optional_results: dict[str, object] = {}
+        for source, count in source_counts.items():
+            if count == 0 and source != "sina_option_codes" and source_counts["sina_option_codes"] > 0:
+                message = f"No {source} rows parsed from Sina option near-month contracts."
+                repository.record_source_failure("etf_options", source, message)
+                optional_results[source] = {"status": "failed", "records_written": 0, "error": message}
+            else:
+                if count == 0 and records:
+                    repository.record_source_success("etf_options", source, 0)
+                optional_results[source] = {"status": "fresh", "records_written": count}
+        return {
+            "module": module_id,
+            "symbol": option_symbol,
+            "status": "fresh",
+            "records_written": records_written,
+            "optional_results": optional_results,
+        }
+
     return {"module": module_id, "symbol": symbol, "status": "not_configured", "records_written": 0}
 
 
@@ -532,6 +561,7 @@ def _default_source_for_module(module_id: str) -> str:
         "signals": "eastmoney_concept_blocks",
         "news": "eastmoney_stock_news",
         "chip_liquidity": "stock_fund_flow_120d",
+        "etf_options": "sina_option_codes",
     }.get(module_id, "not_configured")
 
 

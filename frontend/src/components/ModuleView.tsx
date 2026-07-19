@@ -381,6 +381,149 @@ export function ModuleView({
     );
   }
 
+  if (module.id === "etf_options") {
+    const quickEntries = [
+      { label: "50ETF", symbol: "510050.SH" },
+      { label: "300ETF", symbol: "510300.SH" },
+      { label: "科创50ETF", symbol: "588000.SH" },
+      { label: "500ETF", symbol: "510500.SH" }
+    ];
+
+    if (!selectedSymbol) {
+      return (
+        <div className="security-start-screen module-market-start">
+          <section className="security-start-card">
+            <div>
+              <span className="start-eyebrow">ETF Options Layer</span>
+              <h1>Search or select an ETF option underlying</h1>
+              <p>Sina hq.sinajs provides ETF option chains, T-quotes, Greeks and implied volatility. Values are source-provided and not locally priced with BSM.</p>
+            </div>
+            <div className="start-search-box">
+              <input
+                aria-label="Search or resolve ETF option underlying"
+                value={searchQuery}
+                placeholder="Search 510050, 510300, 588000 or 510500"
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+              <div className="market-placeholders option-quick-entries">
+                {quickEntries.map((entry) => (
+                  <button key={entry.symbol} type="button" onClick={() => onSelectSymbol(entry.symbol)}>
+                    {entry.label}: {entry.symbol}
+                  </button>
+                ))}
+              </div>
+              {(searchQuery || isSearching) && (
+                <div className="start-search-results">
+                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
+                  {!isSearching && searchResults.length === 0 && searchQuery && (
+                    <div className="start-search-row muted">No local free-stockdb match.</div>
+                  )}
+                  {searchResults.slice(0, 5).map((result) => (
+                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
+                      <span>{result.symbol}</span>
+                      <strong>{result.name}</strong>
+                      <small>{result.exchange}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    const optionsPayload = data?.etf_options;
+    const optionSections = optionsPayload?.sections ?? [];
+    const optionTables = optionsPayload?.tables ?? [];
+    const visibleOptionTables = optionTables.filter((table) => table.rows.length > 0);
+
+    return (
+      <div className="content-grid module-reports-grid module-etf-options-grid">
+        <section className="panel hero-panel module-dark-hero">
+          <div>
+            <h1>{module.label}</h1>
+            <p>{module.layer} · Sina ETF option chains, T-quotes, Greeks and implied volatility. Greeks and IV are source-provided; no local BSM pricing is performed.</p>
+          </div>
+          <div className="security-meta">
+            <span>{selectedSymbol}</span>
+            <StatusBadge status={data?.status ?? module.status} />
+            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
+              <RefreshCw aria-hidden="true" size={14} />
+              {moduleRefreshing ? "Refreshing" : "Refresh module"}
+            </button>
+          </div>
+        </section>
+
+        {loading && <div className="panel loading-panel">Loading ETF options module data...</div>}
+        {error && <EmptyState title="ETF options request failed" detail={error} />}
+
+        {!loading && !error && (
+          <>
+            {optionSections.map((section) => (
+              <section key={section.id} className="panel market-snapshot-panel module-report-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>{section.title}</h2>
+                  </div>
+                  <span className="market-section-meta">
+                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+                  </span>
+                </div>
+                <div className="snapshot-grid module-dynamic-grid">
+                  {section.cards.map((card) => (
+                    <div key={`${section.id}-${card.label}`}>
+                      <span>{card.label}</span>
+                      <strong>{displayValue(card.value)}</strong>
+                      {card.status && <StatusBadge status={card.status} />}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {visibleOptionTables.map((table) => (
+              <section key={table.id} className="panel module-market-strip">
+                <div className="section-heading">
+                  <div>
+                    <h2>{table.title}</h2>
+                  </div>
+                  <StatusBadge status="fresh" />
+                </div>
+                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+              </section>
+            ))}
+
+            <section className="panel module-market-strip">
+              <div className="section-heading">
+                <div>
+                  <h2>Source Status</h2>
+                </div>
+                <RadioTower aria-hidden="true" size={20} />
+              </div>
+              <div className="market-source-grid">
+                {(optionsPayload?.source_status ?? []).map((source) => (
+                  <div key={source.source} className="market-source-card">
+                    <div>
+                      <strong>{source.source}</strong>
+                      <StatusBadge status={source.status} />
+                    </div>
+                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+                    {source.last_error && <p>{source.last_error}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {optionSections.length === 0 && visibleOptionTables.length === 0 && (
+              <EmptyState title="No ETF options payload" detail="Refresh the module to collect Sina ETF option chains, T-quotes, Greeks and implied volatility." />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (module.id === "announcements") {
     if (!selectedSymbol) {
       return (
