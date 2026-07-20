@@ -125,8 +125,8 @@ export function fetchSecurityBoards(symbol: string): Promise<BoardMappingRespons
   return apiGet<BoardMappingResponse>(`/api/security/${encodeURIComponent(symbol)}/boards`);
 }
 
-export function generateAiAnalysis(symbol: string, request: AiAnalysisRequest): Promise<AiAnalysisResponse> {
-  return apiPostJson<AiAnalysisResponse>(`/api/security/${encodeURIComponent(symbol)}/ai-analysis`, request);
+export function generateAiAnalysis(request: AiAnalysisRequest): Promise<AiAnalysisResponse> {
+  return apiPostJson<AiAnalysisResponse>("/api/ai/analyze", request);
 }
 
 export function fetchModuleData(moduleId: string, symbol: string | null): Promise<ModuleDataResponse> {

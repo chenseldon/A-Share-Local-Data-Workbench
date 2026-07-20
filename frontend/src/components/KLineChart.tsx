@@ -7,7 +7,6 @@ import {
 } from "react";
 import {
   ArrowUpRight,
-  Bot,
   Brush,
   ChevronUp,
   Crosshair,
@@ -59,7 +58,6 @@ interface KLineChartProps {
   error?: string | null;
   onRefresh?: () => void;
   onPrintSecurity?: () => void;
-  onOpenAiAnalyst?: () => void;
   refreshing?: boolean;
   searchQuery?: string;
   searchResults?: Security[];
@@ -306,7 +304,6 @@ export function KLineChart(props: KLineChartProps) {
     error,
     onRefresh,
     onPrintSecurity,
-    onOpenAiAnalyst,
     refreshing,
     searchQuery = "",
     searchResults = [],
@@ -1068,20 +1065,12 @@ export function KLineChart(props: KLineChartProps) {
               </button>
             )}
           </div>
-          {(onRefresh || onOpenAiAnalyst) && (
+          {onRefresh && (
             <div className="chart-action-stack">
-              {onRefresh && (
-                <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
-                  <RefreshCw aria-hidden="true" size={15} />
-                  {refreshing ? "Refreshing" : "Refresh market"}
-                </button>
-              )}
-              {onOpenAiAnalyst && (
-                <button className="secondary-button" type="button" onClick={onOpenAiAnalyst}>
-                  <Bot aria-hidden="true" size={15} />
-                  AI Analyst
-                </button>
-              )}
+              <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
+                <RefreshCw aria-hidden="true" size={15} />
+                {refreshing ? "Refreshing" : "Refresh market"}
+              </button>
             </div>
           )}
         </div>

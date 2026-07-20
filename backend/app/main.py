@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .ai_analysis import Provider, build_ai_context, chart_rows_with_all_indicators, generate_analysis, make_pdf_base64
+from .ai_analysis import AnalysisScope, Provider, build_analysis_context, generate_html_analysis
 from .connectors.astock_sources import (
     AStockSourceError,
     block_trade,
@@ -61,6 +61,12 @@ class AiAnalysisRequest(BaseModel):
     provider: Provider
     api_key: str = Field(min_length=1)
     model: str | None = None
+    scope: AnalysisScope = "security_full"
+    symbol: str | None = None
+    module_id: str | None = None
+    include_latest_refresh: bool = False
+    page_content: Any | None = None
+    screenshot_base64: str | None = None
     period: str = Field(default="1d", pattern="^(1m|5m|15m|30m|60m|1d|1w|1M)$")
 
 
@@ -273,40 +279,67 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
             "indicator_error": indicator_error,
         }
 
-    @app.post("/api/security/{symbol}/ai-analysis")
-    def security_ai_analysis(
-        symbol: str,
+    @app.post("/api/ai/analyze")
+    def ai_analyze(
         request: AiAnalysisRequest,
         repository: DataRepository = Depends(get_repository),
     ) -> dict[str, object]:
+        normalized_symbol: str | None = None
+        security_name: str | None = None
+        if request.symbol:
+            try:
+                normalized_symbol = normalize_symbol(request.symbol)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            overview = repository.get_security_overview(normalized_symbol)
+            security = overview.get("security")
+            if security is None:
+                raise HTTPException(status_code=404, detail=f"No local security found for {normalized_symbol}")
+            security_name = security.get("name")
+        if request.scope == "module" and not request.module_id:
+            raise HTTPException(status_code=400, detail="module_id is required for module AI analysis.")
         try:
-            normalized_symbol = normalize_symbol(symbol)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        overview = repository.get_security_overview(normalized_symbol)
-        security = overview.get("security")
-        if security is None:
-            raise HTTPException(status_code=404, detail=f"No local security found for {normalized_symbol}")
-        try:
-            chart_rows, indicator_status, indicator_error = chart_rows_with_all_indicators(repository, normalized_symbol, request.period)
-            context = build_ai_context(repository, normalized_symbol, request.period, chart_rows, indicator_status, indicator_error)
-            report_text, usage, model = generate_analysis(request.provider, request.api_key, request.model, context)
-            title = f"{normalized_symbol} {security.get('name') or ''} AI Analyst Report"
-            pdf_base64 = make_pdf_base64(report_text, title)
+            context = build_analysis_context(
+                repository,
+                scope=request.scope,
+                symbol=normalized_symbol,
+                module_id=request.module_id,
+                period=request.period,
+                page_content=request.page_content,
+                include_latest_refresh=request.include_latest_refresh,
+            )
+            report_html, report_text, usage, model, input_mode = generate_html_analysis(
+                request.provider,
+                request.api_key,
+                request.model,
+                context,
+                screenshot_base64=request.screenshot_base64,
+            )
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 - never echo provider errors because they can contain sensitive request context.
             raise HTTPException(status_code=502, detail="AI analysis request failed.") from exc
         return {
             "symbol": normalized_symbol,
-            "name": security.get("name"),
+            "name": security_name,
             "provider": request.provider,
             "model": model,
             "generated_at": datetime.now(UTC).isoformat(),
+            "report_html": report_html,
             "report_text": report_text,
-            "pdf_base64": pdf_base64,
+            "input_mode": input_mode,
             "usage": usage,
         }
+
+    @app.post("/api/security/{symbol}/ai-analysis")
+    def security_ai_analysis_compat(
+        symbol: str,
+        request: AiAnalysisRequest,
+        repository: DataRepository = Depends(get_repository),
+    ) -> dict[str, object]:
+        request.symbol = symbol
+        request.scope = "security_full"
+        return ai_analyze(request, repository)
 
     @app.get("/api/security/{symbol}/boards")
     def security_boards(

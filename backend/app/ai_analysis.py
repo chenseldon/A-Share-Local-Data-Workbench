@@ -1,26 +1,22 @@
 from __future__ import annotations
 
-import base64
+import html
 import json
-from dataclasses import dataclass
+import re
 from datetime import UTC, datetime
-from io import BytesIO
-from textwrap import wrap
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfbase.pdfmetrics import registerFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from .connectors.public_market import FREE_STOCKDB_INDICATOR_CONFIG, fetch_free_stockdb_indicators
+from .modules import MODULES
 from .repository import DataRepository
 
 
 Provider = Literal["openai", "anthropic", "deepseek"]
+AnalysisScope = Literal["current_page", "security_full", "module", "all_modules"]
+InputMode = Literal["content", "content+screenshot"]
 
 DEFAULT_MODELS: dict[Provider, str] = {
     "openai": "gpt-5",
@@ -29,45 +25,54 @@ DEFAULT_MODELS: dict[Provider, str] = {
 }
 
 SYSTEM_PROMPT = """You are a public-equity research assistant for a local A-share research workbench.
-Use only the supplied JSON data. Do not invent missing facts.
+Use only the supplied structured data and screenshot. Do not invent missing facts.
 The output is research commentary, not a trading instruction.
-Return the report in Chinese with the exact template sections requested."""
+Return a self-contained HTML fragment in Chinese using the requested report structure."""
 
-REPORT_TEMPLATE = """首行格式必须为：
-# {symbol} {name} | 评分：{0-100} | 倾向：看多/中性/看空
-
-固定章节：
-## 核心结论
-## 价格/量能
-## 基本面
-## 公告/新闻/研报
-## 资金筹码
-## 信号层
-## 反证与失效条件
-## 数据质量与来源限制
-
-要求：
-- 评分必须是 0 到 100 的整数。
-- 倾向只能是 看多、中性、看空。
-- 每个结论都应能追溯到输入数据字段、source 或 fetched_at。
-- 对缺失、过期、失败或空表数据必须明确说明，不要补全。
-- 不得给出无条件买入、卖出、加仓、减仓、做多或做空指令。
-"""
+REPORT_SPEC_PATH = Path(__file__).resolve().parents[2] / "AIReport.md"
 
 
-@dataclass(frozen=True)
-class AnalysisResult:
-    symbol: str
-    name: str
-    provider: Provider
-    model: str
-    generated_at: str
-    report_text: str
-    pdf_base64: str
-    usage: dict[str, Any] | None
+def build_analysis_context(
+    repository: DataRepository,
+    *,
+    scope: AnalysisScope,
+    symbol: str | None,
+    module_id: str | None,
+    period: str,
+    page_content: Any,
+    include_latest_refresh: bool,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "scope": scope,
+        "symbol": symbol,
+        "module_id": module_id,
+        "period": period,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "include_latest_refresh": include_latest_refresh,
+        "page_content": _bounded_value(page_content, max_rows=160, max_chars=160_000),
+        "source_status": repository.list_source_health(),
+    }
+    if scope in {"security_full", "all_modules"} and symbol:
+        chart_rows, indicator_status, indicator_error = chart_rows_with_all_indicators(repository, symbol, period)
+        context["security_full"] = build_security_context(
+            repository,
+            symbol,
+            period,
+            chart_rows,
+            indicator_status,
+            indicator_error,
+        )
+    if scope == "module" and module_id:
+        context["module_data"] = repository.get_module_data(module_id, symbol, limit=100)
+    if scope == "all_modules":
+        context["modules"] = {
+            module.id: repository.get_module_data(module.id, symbol, limit=100)
+            for module in MODULES
+        }
+    return context
 
 
-def build_ai_context(
+def build_security_context(
     repository: DataRepository,
     symbol: str,
     period: str,
@@ -76,25 +81,13 @@ def build_ai_context(
     indicator_error: str | None,
 ) -> dict[str, Any]:
     overview = repository.get_security_overview(symbol)
-    boards = {
-        "concepts": [],
-        "sw_l1": [],
-        "sw_l2": [],
-        "sw_l3": [],
-        "source": None,
-        "fetched_at": None,
-        "status": "not_collected",
-    }
-    source_status = repository.list_source_health()
     return {
         "symbol": symbol,
         "period": period,
-        "generated_at": datetime.now(UTC).isoformat(),
         "security": overview.get("security"),
         "market": overview.get("market"),
         "quote": overview.get("quote"),
         "freshness": overview.get("freshness"),
-        "boards": boards,
         "chart": {
             "period": period,
             "row_count": len(chart_rows),
@@ -104,7 +97,6 @@ def build_ai_context(
             "indicator_error": indicator_error,
         },
         "snapshots": overview.get("module_snapshots", []),
-        "source_status": source_status,
     }
 
 
@@ -135,88 +127,102 @@ def chart_rows_with_all_indicators(repository: DataRepository, symbol: str, peri
     return rows, indicator_status, indicator_error
 
 
-def generate_analysis(
+def generate_html_analysis(
     provider: Provider,
     api_key: str,
     model: str | None,
     context: dict[str, Any],
+    screenshot_base64: str | None = None,
     client: httpx.Client | None = None,
-) -> tuple[str, dict[str, Any] | None, str]:
+) -> tuple[str, str, dict[str, Any] | None, str, InputMode]:
     selected_model = model.strip() if model and model.strip() else DEFAULT_MODELS[provider]
-    prompt = _analysis_prompt(context)
+    use_screenshot = bool(screenshot_base64 and model_supports_screenshot(provider, selected_model))
+    input_mode: InputMode = "content+screenshot" if use_screenshot else "content"
+    prompt = _analysis_prompt(context, input_mode)
     owns_client = client is None
-    http_client = client or httpx.Client(timeout=60)
+    http_client = client or httpx.Client(timeout=90)
     try:
         if provider == "openai":
-            text, usage = _call_openai(http_client, api_key, selected_model, prompt)
+            text, usage = _call_openai(http_client, api_key, selected_model, prompt, screenshot_base64 if use_screenshot else None)
         elif provider == "anthropic":
-            text, usage = _call_anthropic(http_client, api_key, selected_model, prompt)
+            text, usage = _call_anthropic(http_client, api_key, selected_model, prompt, screenshot_base64 if use_screenshot else None)
         elif provider == "deepseek":
-            text, usage = _call_deepseek(http_client, api_key, selected_model, prompt)
+            text, usage = _call_deepseek(http_client, api_key, selected_model, prompt, screenshot_base64 if use_screenshot else None)
         else:
             raise ValueError(f"Unsupported AI provider: {provider}")
     finally:
         if owns_client:
             http_client.close()
-    return text.strip(), usage, selected_model
+    report_html = sanitize_report_html(text)
+    report_text = html_to_text(report_html)
+    return report_html, report_text, usage, selected_model, input_mode
 
 
-def make_pdf_base64(report_text: str, title: str) -> str:
-    pdf_bytes = BytesIO()
-    registerFont(UnicodeCIDFont("STSong-Light"))
-    styles = getSampleStyleSheet()
-    body_style = ParagraphStyle(
-        "ChineseBody",
-        parent=styles["BodyText"],
-        fontName="STSong-Light",
-        fontSize=10,
-        leading=15,
-        spaceAfter=5,
-    )
-    heading_style = ParagraphStyle(
-        "ChineseHeading",
-        parent=styles["Heading2"],
-        fontName="STSong-Light",
-        fontSize=13,
-        leading=18,
-        spaceBefore=8,
-        spaceAfter=6,
-    )
-    story: list[Any] = [Paragraph(_escape_pdf_text(title), heading_style), Spacer(1, 4 * mm)]
-    for line in report_text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            story.append(Spacer(1, 3 * mm))
-            continue
-        style = heading_style if stripped.startswith("#") else body_style
-        cleaned = stripped.lstrip("#").strip()
-        for chunk in wrap(cleaned, width=95, break_long_words=False, replace_whitespace=False) or [cleaned]:
-            story.append(Paragraph(_escape_pdf_text(chunk), style))
-    document = SimpleDocTemplate(
-        pdf_bytes,
-        pagesize=A4,
-        leftMargin=16 * mm,
-        rightMargin=16 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
-        title=title,
-    )
-    document.build(story)
-    return base64.b64encode(pdf_bytes.getvalue()).decode("ascii")
+def model_supports_screenshot(provider: Provider, model: str) -> bool:
+    normalized = model.lower()
+    if provider == "openai":
+        return any(token in normalized for token in ("gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4", "vision"))
+    if provider == "anthropic":
+        return any(token in normalized for token in ("claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "sonnet", "opus", "haiku"))
+    if provider == "deepseek":
+        return "vision" in normalized or "vl" in normalized
+    return False
 
 
-def _analysis_prompt(context: dict[str, Any]) -> str:
-    symbol = str(context.get("symbol") or "")
-    security = context.get("security") if isinstance(context.get("security"), dict) else {}
-    name = str(security.get("name") or "")
+def sanitize_report_html(value: str) -> str:
+    cleaned = _strip_code_fence(value.strip())
+    if "<" not in cleaned or ">" not in cleaned:
+        cleaned = _plain_text_to_html(cleaned)
+    cleaned = re.sub(r"<script\b[^>]*>.*?</script>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"\s+on[a-zA-Z]+\s*=\s*(['\"]).*?\1", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"\s+on[a-zA-Z]+\s*=\s*[^\s>]+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"javascript:", "", cleaned, flags=re.IGNORECASE)
+    if "ai-report-document" not in cleaned:
+        cleaned = f'<article class="ai-report-document">{cleaned}</article>'
+    return cleaned
+
+
+def html_to_text(value: str) -> str:
+    text = re.sub(r"<(br|/p|/div|/li|/h[1-6]|/section|/article)\b[^>]*>", "\n", value, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _analysis_prompt(context: dict[str, Any], input_mode: InputMode) -> str:
+    report_spec = _load_report_spec()
     return (
-        REPORT_TEMPLATE.replace("{symbol}", symbol).replace("{name}", name)
-        + "\n\n输入数据 JSON：\n"
+        f"{report_spec}\n\n"
+        f"Input mode: {input_mode}. If a screenshot is provided, use it only to cross-check visual context; structured data remains primary.\n\n"
+        "Structured input JSON:\n"
         + json.dumps(context, ensure_ascii=False, default=str)
     )
 
 
-def _call_openai(client: httpx.Client, api_key: str, model: str, prompt: str) -> tuple[str, dict[str, Any] | None]:
+def _load_report_spec() -> str:
+    if REPORT_SPEC_PATH.exists():
+        return REPORT_SPEC_PATH.read_text(encoding="utf-8")
+    return (
+        "# AI Report Spec\n"
+        "Return a dark-theme HTML research report. Use the fixed sections: 核心结论, 行情层, 指标层, 基础数据, 公告层, 新闻层, 研报层, 资金面/筹码层, 信号层, 期权层, 反证与失效条件, 数据质量与来源限制."
+    )
+
+
+def _call_openai(
+    client: httpx.Client,
+    api_key: str,
+    model: str,
+    prompt: str,
+    screenshot_base64: str | None,
+) -> tuple[str, dict[str, Any] | None]:
+    user_content: Any
+    if screenshot_base64:
+        user_content = [
+            {"type": "input_text", "text": prompt},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{screenshot_base64}"},
+        ]
+    else:
+        user_content = prompt
     response = client.post(
         "https://api.openai.com/v1/responses",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -224,7 +230,7 @@ def _call_openai(client: httpx.Client, api_key: str, model: str, prompt: str) ->
             "model": model,
             "input": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
         },
     )
@@ -234,7 +240,21 @@ def _call_openai(client: httpx.Client, api_key: str, model: str, prompt: str) ->
     return str(text or ""), payload.get("usage")
 
 
-def _call_anthropic(client: httpx.Client, api_key: str, model: str, prompt: str) -> tuple[str, dict[str, Any] | None]:
+def _call_anthropic(
+    client: httpx.Client,
+    api_key: str,
+    model: str,
+    prompt: str,
+    screenshot_base64: str | None,
+) -> tuple[str, dict[str, Any] | None]:
+    content: Any
+    if screenshot_base64:
+        content = [
+            {"type": "text", "text": prompt},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": screenshot_base64}},
+        ]
+    else:
+        content = prompt
     response = client.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -244,9 +264,9 @@ def _call_anthropic(client: httpx.Client, api_key: str, model: str, prompt: str)
         },
         json={
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 6000,
             "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
         },
     )
     response.raise_for_status()
@@ -255,7 +275,19 @@ def _call_anthropic(client: httpx.Client, api_key: str, model: str, prompt: str)
     return text, payload.get("usage")
 
 
-def _call_deepseek(client: httpx.Client, api_key: str, model: str, prompt: str) -> tuple[str, dict[str, Any] | None]:
+def _call_deepseek(
+    client: httpx.Client,
+    api_key: str,
+    model: str,
+    prompt: str,
+    screenshot_base64: str | None,
+) -> tuple[str, dict[str, Any] | None]:
+    user_content: Any = prompt
+    if screenshot_base64:
+        user_content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
+        ]
     response = client.post(
         "https://api.deepseek.com/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -263,7 +295,7 @@ def _call_deepseek(client: httpx.Client, api_key: str, model: str, prompt: str) 
             "model": model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
         },
     )
@@ -285,5 +317,44 @@ def _extract_openai_output_text(payload: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _escape_pdf_text(value: str) -> str:
-    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def _strip_code_fence(value: str) -> str:
+    match = re.fullmatch(r"```(?:html)?\s*(.*?)\s*```", value, flags=re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else value
+
+
+def _plain_text_to_html(value: str) -> str:
+    lines = value.splitlines()
+    parts: list[str] = ['<article class="ai-report-document">']
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("# "):
+            parts.append(f"<h1>{html.escape(stripped[2:].strip())}</h1>")
+        elif stripped.startswith("## "):
+            parts.append(f"<h2>{html.escape(stripped[3:].strip())}</h2>")
+        elif stripped.startswith("- "):
+            parts.append(f"<p>{html.escape(stripped)}</p>")
+        else:
+            parts.append(f"<p>{html.escape(stripped)}</p>")
+    parts.append("</article>")
+    return "\n".join(parts)
+
+
+def _bounded_value(value: Any, *, max_rows: int, max_chars: int) -> Any:
+    serialized = json.dumps(value, ensure_ascii=False, default=str)
+    if len(serialized) <= max_chars:
+        return value
+    if isinstance(value, dict):
+        bounded: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(item, list):
+                bounded[key] = item[:max_rows]
+            elif isinstance(item, dict):
+                bounded[key] = _bounded_value(item, max_rows=max_rows, max_chars=max_chars // 2)
+            else:
+                bounded[key] = item
+        return bounded
+    if isinstance(value, list):
+        return value[:max_rows]
+    return str(value)[:max_chars]

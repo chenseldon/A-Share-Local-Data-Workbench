@@ -17,6 +17,7 @@ import {
   refreshSecurityUniverse,
   searchSecurities
 } from "./api";
+import { AiRightRail } from "./components/AiRightRail";
 import { ModuleView } from "./components/ModuleView";
 import { SecurityOverview } from "./components/SecurityOverview";
 import { Sidebar } from "./components/Sidebar";
@@ -25,6 +26,7 @@ import { TopBar } from "./components/TopBar";
 import { fallbackModules } from "./data/fallbackModules";
 import type {
   AiAnalysisResponse,
+  AiAnalysisScope,
   AiProvider,
   DataJob,
   BoardMappingResponse,
@@ -61,14 +63,18 @@ interface ToastState {
 }
 
 interface AiAnalystState {
-  open: boolean;
   provider: AiProvider;
   model: string;
   apiKey: string;
+  scope: AiAnalysisScope;
+  moduleId: string;
+  includeLatestRefresh: boolean;
   loading: boolean;
   error: string | null;
   result: AiAnalysisResponse | null;
 }
+
+type RightPanel = "settings" | "ai" | null;
 
 type SettledRequest<T> = { status: "fulfilled"; value: T } | { status: "rejected"; reason: unknown };
 
@@ -101,6 +107,105 @@ function snapshotSignature(overview: SecurityOverviewType): string {
     .join("|");
 }
 
+function collectVisibleTables(root: HTMLElement | null) {
+  if (!root) {
+    return [];
+  }
+  return Array.from(root.querySelectorAll("table")).slice(0, 24).map((table) => {
+    const caption = table.closest("section, .security-snapshot-table")?.querySelector("h2, h3")?.textContent?.trim() ?? "";
+    const headers = Array.from(table.querySelectorAll("th")).map((cell) => cell.textContent?.trim() ?? "");
+    const rows = Array.from(table.querySelectorAll("tbody tr")).slice(0, 40).map((row) =>
+      Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent?.trim() ?? "")
+    );
+    return { caption, headers, rows };
+  });
+}
+
+function collectVisibleLinks(root: HTMLElement | null) {
+  if (!root) {
+    return [];
+  }
+  return Array.from(root.querySelectorAll<HTMLAnchorElement>("a[href]")).slice(0, 120).map((anchor) => ({
+    text: anchor.textContent?.trim() ?? "",
+    href: anchor.href,
+  }));
+}
+
+async function captureElementScreenshotBase64(element: HTMLElement): Promise<string | null> {
+  const rect = element.getBoundingClientRect();
+  const width = Math.max(320, Math.min(1400, Math.ceil(rect.width)));
+  const height = Math.max(320, Math.min(2200, Math.ceil(rect.height)));
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".chart-actions, .chart-toolrail, .indicator-menu, .start-search-results, .drawing-layer").forEach((node) => node.remove());
+  clone.style.width = `${width}px`;
+  clone.style.height = `${height}px`;
+  clone.style.overflow = "hidden";
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+      <foreignObject width="100%" height="100%">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="background:#0b1118;color:#eef4f7;font-family:Inter,Arial,sans-serif;width:${width}px;height:${height}px;overflow:hidden;">
+          ${serialized}
+        </div>
+      </foreignObject>
+    </svg>`;
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          resolve(null);
+          return;
+        }
+        context.drawImage(image, 0, 0);
+        resolve(canvas.toDataURL("image/png").split(",")[1] ?? null);
+      } catch {
+        resolve(null);
+      }
+    };
+    image.onerror = () => resolve(null);
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
+
+function standaloneAiReportHtml(reportHtml: string): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Analyst Report</title>
+  <style>${aiReportCss()}</style>
+</head>
+<body>
+  <main class="ai-report-print-shell">${reportHtml}</main>
+</body>
+</html>`;
+}
+
+function aiReportCss(): string {
+  return `
+    :root{color-scheme:dark;--bg:#071018;--surface:#101923;--surface-strong:#142638;--ink:#eef4f7;--muted:#9fb0bd;--line:rgba(216,224,232,.16);--accent:#38bdf8;--danger:#fb7185;--success:#2dd4bf}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .ai-report-print-shell{max-width:1040px;margin:0 auto;padding:28px}
+    .ai-report-document{display:grid;gap:14px}
+    .ai-report-document h1{margin:0 0 8px;font-size:26px;line-height:1.2;color:#f8fafc}
+    .ai-report-document h2{margin:14px 0 4px;font-size:17px;color:#67e8f9}
+    .ai-report-document h3{margin:10px 0 2px;font-size:14px;color:#cbd5e1}
+    .ai-report-document p,.ai-report-document li{color:#d8e0e8;line-height:1.65;font-size:13px}
+    .ai-report-document section,.ai-report-document .card{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:14px}
+    .ai-report-document table{width:100%;border-collapse:collapse;background:var(--surface);font-size:12px}
+    .ai-report-document th,.ai-report-document td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
+    .ai-report-document th{background:var(--surface-strong);color:#ccd8df;text-transform:uppercase}
+    .ai-report-document a{color:#67e8f9;text-decoration:none}
+    @media print{body{background:var(--bg);-webkit-print-color-adjust:exact;print-color-adjust:exact}.ai-report-print-shell{padding:0}.ai-report-document section,.ai-report-document .card{break-inside:avoid}}
+  `;
+}
+
 export default function App() {
   const [modules, setModules] = useState<ModuleDefinition[]>(fallbackModules);
   const [activeView, setActiveView] = useState<ActiveView>("security");
@@ -129,7 +234,10 @@ export default function App() {
   const moduleDataCacheRef = useRef<Record<string, ModuleDataResponse>>({});
   const cachePrimingSymbolRef = useRef<string | null>(null);
   const [pendingModuleAnchor, setPendingModuleAnchor] = useState<string | null>(null);
-  const aiPdfFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const workspaceBodyRef = useRef<HTMLDivElement | null>(null);
+  const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanel, setRightPanel] = useState<RightPanel>(null);
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
@@ -140,10 +248,12 @@ export default function App() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [apiHealthError, setApiHealthError] = useState<string | null>(null);
   const [aiAnalyst, setAiAnalyst] = useState<AiAnalystState>({
-    open: false,
     provider: "openai",
     model: aiDefaultModels.openai,
     apiKey: "",
+    scope: "current_page",
+    moduleId: "market",
+    includeLatestRefresh: false,
     loading: false,
     error: null,
     result: null,
@@ -154,10 +264,6 @@ export default function App() {
     [activeModule, modules]
   );
   const chartIndicatorKey = useMemo(() => chartIndicators.join(","), [chartIndicators]);
-  const aiPdfDataUrl = useMemo(
-    () => aiAnalyst.result ? `data:application/pdf;base64,${aiAnalyst.result.pdf_base64}` : "",
-    [aiAnalyst.result]
-  );
 
   useEffect(() => {
     fetchHealth()
@@ -589,69 +695,164 @@ export default function App() {
       .finally(() => setModuleRefreshing(false));
   }
 
-  function openAiAnalyst() {
-    setAiAnalyst((current) => ({
-      ...current,
-      open: true,
-      error: null,
-      result: null,
-      model: current.model || aiDefaultModels[current.provider],
-    }));
+  function openRightPanel(panel: "settings" | "ai") {
+    setRightPanel(panel);
+    setRightPanelOpen(true);
   }
 
-  function closeAiAnalyst() {
-    setAiAnalyst({
-      open: false,
-      provider: "openai",
-      model: aiDefaultModels.openai,
-      apiKey: "",
-      loading: false,
-      error: null,
-      result: null,
+  function toggleRightPanelOpen() {
+    setRightPanelOpen((open) => {
+      if (open) {
+        setAiAnalyst((current) => ({ ...current, apiKey: "" }));
+        return false;
+      }
+      setRightPanel((panel) => panel ?? "ai");
+      return true;
     });
   }
 
-  function updateAiProvider(provider: AiProvider) {
+  function updateAiSettings(settings: Pick<AiAnalystState, "provider" | "model" | "apiKey">) {
     setAiAnalyst((current) => ({
       ...current,
-      provider,
-      model: aiDefaultModels[provider],
+      ...settings,
       error: null,
     }));
   }
 
-  function runAiAnalyst() {
-    if (!selectedSymbol || !aiAnalyst.apiKey.trim()) {
+  async function runAiAnalyst() {
+    if (!aiAnalyst.apiKey.trim()) {
       setAiAnalyst((current) => ({ ...current, error: "API key is required for this one-time request." }));
+      openRightPanel("settings");
+      return;
+    }
+    const scope = aiAnalyst.scope;
+    const moduleId = scope === "module" ? aiAnalyst.moduleId || activeModule : null;
+    const requiresSymbol = scope === "security_full" || scope === "all_modules";
+    if (requiresSymbol && !selectedSymbol) {
+      setAiAnalyst((current) => ({ ...current, error: "Select a symbol before running this analysis scope." }));
       return;
     }
     setAiAnalyst((current) => ({ ...current, loading: true, error: null, result: null }));
-    generateAiAnalysis(selectedSymbol, {
-      provider: aiAnalyst.provider,
-      api_key: aiAnalyst.apiKey,
-      model: aiAnalyst.model,
-      period: chartPeriod,
-    })
-      .then((result) => setAiAnalyst((current) => ({ ...current, loading: false, result, error: null })))
-      .catch((error: unknown) => setAiAnalyst((current) => ({ ...current, loading: false, error: errorMessage(error) })));
+    try {
+      if (aiAnalyst.includeLatestRefresh) {
+        await refreshForAiScope(scope, moduleId);
+      }
+      const pageContent = collectAnalysisContent(scope, moduleId);
+      const screenshotBase64 = await captureWorkspaceScreenshot();
+      const result = await generateAiAnalysis({
+        provider: aiAnalyst.provider,
+        api_key: aiAnalyst.apiKey,
+        model: aiAnalyst.model,
+        scope,
+        symbol: selectedSymbol,
+        module_id: moduleId,
+        include_latest_refresh: aiAnalyst.includeLatestRefresh,
+        page_content: pageContent,
+        screenshot_base64: screenshotBase64,
+        period: chartPeriod,
+      });
+      setAiAnalyst((current) => ({ ...current, loading: false, result, error: null }));
+      openRightPanel("ai");
+    } catch (error: unknown) {
+      setAiAnalyst((current) => ({ ...current, loading: false, error: errorMessage(error) }));
+    }
+  }
+
+  async function refreshForAiScope(scope: AiAnalysisScope, moduleId: string | null) {
+    if (scope === "module" && moduleId) {
+      await refreshModule(moduleId, selectedSymbol);
+      if (selectedSymbol) {
+        await readBackSecurityContext(selectedSymbol);
+      }
+      return;
+    }
+    if (selectedSymbol && (scope === "security_full" || scope === "all_modules" || activeView === "security")) {
+      await runFullRefresh(selectedSymbol);
+    }
+  }
+
+  function collectAnalysisContent(scope: AiAnalysisScope, moduleId: string | null) {
+    const root = workspaceBodyRef.current;
+    return {
+      scope,
+      active_view: activeView,
+      active_module: activeModule,
+      requested_module: moduleId,
+      selected_symbol: selectedSymbol,
+      chart_period: chartPeriod,
+      visible_text: root?.innerText.slice(0, 60_000) ?? "",
+      visible_tables: collectVisibleTables(root),
+      visible_links: collectVisibleLinks(root),
+      security: {
+        overview,
+        chart: chart ? { ...chart, rows: chart.rows.slice(-500) } : null,
+        boards,
+      },
+      current_module_data: activeView === "module" ? moduleData : null,
+      module_cache_keys: Object.keys(moduleDataCacheRef.current),
+    };
+  }
+
+  async function captureWorkspaceScreenshot(): Promise<string | null> {
+    const root = workspaceBodyRef.current;
+    if (!root) {
+      return null;
+    }
+    return captureElementScreenshotBase64(root);
   }
 
   function copyAiReport() {
-    if (!aiAnalyst.result) {
-      return;
+    if (aiAnalyst.result) {
+      void navigator.clipboard.writeText(aiAnalyst.result.report_text);
     }
-    void navigator.clipboard.writeText(aiAnalyst.result.report_text);
   }
 
   function printAiReport() {
-    aiPdfFrameRef.current?.contentWindow?.print();
+    if (!aiAnalyst.result) {
+      return;
+    }
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=980,height=1200");
+    if (!printWindow) {
+      setAiAnalyst((current) => ({ ...current, error: "Browser blocked the print window." }));
+      return;
+    }
+    printWindow.document.write(standaloneAiReportHtml(aiAnalyst.result.report_html));
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
+  function downloadAiReport() {
+    if (!aiAnalyst.result) {
+      return;
+    }
+    const blob = new Blob([standaloneAiReportHtml(aiAnalyst.result.report_html)], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${selectedSymbol ?? "current-page"}-ai-report.html`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function printWorkspace() {
+    document.body.dataset.printMode = "workspace";
+    window.print();
+    window.setTimeout(() => {
+      delete document.body.dataset.printMode;
+    }, 500);
   }
 
   const darkModuleActive = activeView === "module";
   const darkWorkspaceActive = activeView === "security" || darkModuleActive;
+  const shellClass = [
+    "app-shell",
+    dashboardCollapsed ? "dashboard-collapsed" : "",
+    rightPanelOpen ? "right-panel-open" : "",
+  ].filter(Boolean).join(" ");
 
   return (
-    <div className="app-shell">
+    <div className={shellClass}>
       <Sidebar
         modules={modules}
         activeView={activeView}
@@ -663,6 +864,8 @@ export default function App() {
         }}
         onSelectSystem={() => setActiveView("system")}
         sourceHealth={sources}
+        collapsed={dashboardCollapsed}
+        onToggleCollapsed={() => setDashboardCollapsed((collapsed) => !collapsed)}
       />
       <main className={darkWorkspaceActive ? "workspace workspace-chart-only" : "workspace"}>
         {!darkWorkspaceActive && (
@@ -674,7 +877,7 @@ export default function App() {
             onSelectSymbol={handleSelectSymbol}
           />
         )}
-        <div className="workspace-body">
+        <div className="workspace-body" ref={workspaceBodyRef}>
           {activeView === "security" && (
             <SecurityOverview
               overview={overview}
@@ -691,8 +894,7 @@ export default function App() {
               chartPeriod={chartPeriod}
               onChartPeriodChange={handleChartPeriodChange}
               onRefreshMarket={refreshCurrentView}
-              onPrintSecurity={() => window.print()}
-              onOpenAiAnalyst={openAiAnalyst}
+              onPrintSecurity={printWorkspace}
               marketRefreshing={marketRefreshing}
               searchQuery={query}
               searchResults={searchResults}
@@ -736,72 +938,6 @@ export default function App() {
             <SystemView sources={sources} jobs={jobs} capabilities={capabilities} loading={systemLoading} error={systemError} />
           )}
         </div>
-        {aiAnalyst.open && (
-          <div className="ai-modal-backdrop" role="dialog" aria-modal="true" aria-label="AI Analyst report">
-            <section className="ai-modal">
-              <div className="ai-modal-header">
-                <div>
-                  <span className="start-eyebrow">AI Analyst</span>
-                  <h2>{selectedSymbol ?? "No symbol selected"}</h2>
-                </div>
-                <button className="secondary-button" type="button" onClick={closeAiAnalyst}>
-                  Close
-                </button>
-              </div>
-              <form
-                className="ai-controls"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  runAiAnalyst();
-                }}
-              >
-                <label>
-                  <span>Provider</span>
-                  <select value={aiAnalyst.provider} onChange={(event) => updateAiProvider(event.target.value as AiProvider)}>
-                    <option value="openai">ChatGPT / OpenAI</option>
-                    <option value="anthropic">Claude</option>
-                    <option value="deepseek">DeepSeek</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Model</span>
-                  <input value={aiAnalyst.model} onChange={(event) => setAiAnalyst((current) => ({ ...current, model: event.target.value }))} />
-                </label>
-                <label>
-                  <span>API key</span>
-                  <input
-                    type="password"
-                    value={aiAnalyst.apiKey}
-                    autoComplete="off"
-                    onChange={(event) => setAiAnalyst((current) => ({ ...current, apiKey: event.target.value }))}
-                    placeholder="Used once, not saved"
-                  />
-                </label>
-                <button className="primary-button" type="submit" disabled={aiAnalyst.loading || !selectedSymbol}>
-                  {aiAnalyst.loading ? "Generating PDF" : "Generate"}
-                </button>
-              </form>
-              {aiAnalyst.error && <div className="ai-error">{aiAnalyst.error}</div>}
-              {aiAnalyst.result ? (
-                <>
-                  <div className="ai-report-actions">
-                    <button className="secondary-button" type="button" onClick={copyAiReport}>
-                      Copy
-                    </button>
-                    <button className="secondary-button" type="button" onClick={printAiReport}>
-                      Print
-                    </button>
-                  </div>
-                  <iframe ref={aiPdfFrameRef} className="ai-pdf-frame" title="AI Analyst PDF report" src={aiPdfDataUrl} />
-                </>
-              ) : (
-                <div className="ai-empty">
-                  Enter a provider API key to generate a one-time PDF research report from local Security View data.
-                </div>
-              )}
-            </section>
-          </div>
-        )}
         {updateProgress?.active && (
           <div className="update-progress" role="status" aria-live="polite">
             <div className="update-progress-card">
@@ -815,6 +951,29 @@ export default function App() {
         )}
         {toast && <div className={`toast toast-${toast.kind}`}>{toast.message}</div>}
       </main>
+      <AiRightRail
+        open={rightPanelOpen}
+        activePanel={rightPanel}
+        settings={{ provider: aiAnalyst.provider, model: aiAnalyst.model, apiKey: aiAnalyst.apiKey }}
+        modules={modules}
+        activeModule={activeModule}
+        scope={aiAnalyst.scope}
+        moduleId={aiAnalyst.moduleId}
+        includeLatestRefresh={aiAnalyst.includeLatestRefresh}
+        loading={aiAnalyst.loading}
+        error={aiAnalyst.error}
+        result={aiAnalyst.result}
+        onToggleOpen={toggleRightPanelOpen}
+        onSelectPanel={openRightPanel}
+        onSettingsChange={updateAiSettings}
+        onScopeChange={(scope) => setAiAnalyst((current) => ({ ...current, scope, error: null }))}
+        onModuleIdChange={(moduleId) => setAiAnalyst((current) => ({ ...current, moduleId }))}
+        onIncludeLatestRefreshChange={(enabled) => setAiAnalyst((current) => ({ ...current, includeLatestRefresh: enabled }))}
+        onRunAnalysis={runAiAnalyst}
+        onCopyReport={copyAiReport}
+        onPrintReport={printAiReport}
+        onDownloadReport={downloadAiReport}
+      />
     </div>
   );
 }

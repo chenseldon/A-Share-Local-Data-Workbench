@@ -380,21 +380,30 @@ export interface RefreshResponse {
 }
 
 export type AiProvider = "openai" | "anthropic" | "deepseek";
+export type AiAnalysisScope = "current_page" | "security_full" | "module" | "all_modules";
+export type AiInputMode = "content" | "content+screenshot";
 
 export interface AiAnalysisRequest {
   provider: AiProvider;
   api_key: string;
   model?: string | null;
+  scope: AiAnalysisScope;
+  symbol?: string | null;
+  module_id?: string | null;
+  include_latest_refresh: boolean;
+  page_content?: unknown;
+  screenshot_base64?: string | null;
   period: string;
 }
 
 export interface AiAnalysisResponse {
-  symbol: string;
+  symbol: string | null;
   name: string | null;
   provider: AiProvider;
   model: string;
   generated_at: string;
+  report_html: string;
   report_text: string;
-  pdf_base64: string;
+  input_mode: AiInputMode;
   usage?: Record<string, unknown> | null;
 }

@@ -1,4 +1,4 @@
-import { Activity, Database, Gauge, Layers, Server } from "lucide-react";
+import { Activity, Database, Gauge, Layers, PanelLeftClose, PanelLeftOpen, Server } from "lucide-react";
 import type { ModuleDefinition, SourceHealth } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
@@ -10,6 +10,8 @@ interface SidebarProps {
   onSelectModule: (moduleId: string) => void;
   onSelectSystem: () => void;
   sourceHealth: SourceHealth[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 export function Sidebar({
@@ -18,18 +20,23 @@ export function Sidebar({
   activeModule,
   onSelectSecurity,
   onSelectModule,
-  onSelectSystem
+  onSelectSystem,
+  collapsed,
+  onToggleCollapsed
 }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={collapsed ? "sidebar collapsed" : "sidebar"}>
       <div className="brand">
         <div className="brand-mark">
           <Activity aria-hidden="true" size={20} />
         </div>
-        <div>
-          <strong>A-Share Workbench</strong>
+        <div className="brand-copy">
+          <strong>Dashboard</strong>
           <span>Local research database</span>
         </div>
+        <button className="sidebar-toggle" type="button" onClick={onToggleCollapsed} title={collapsed ? "Expand dashboard" : "Collapse dashboard"}>
+          {collapsed ? <PanelLeftOpen aria-hidden="true" size={17} /> : <PanelLeftClose aria-hidden="true" size={17} />}
+        </button>
       </div>
 
       <nav className="nav-section" aria-label="Workspace views">
