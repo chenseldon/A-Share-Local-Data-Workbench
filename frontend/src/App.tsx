@@ -52,6 +52,15 @@ interface ToastState {
   message: string;
 }
 
+type SettledRequest<T> = { status: "fulfilled"; value: T } | { status: "rejected"; reason: unknown };
+
+function settleRequest<T>(promise: Promise<T>): Promise<SettledRequest<T>> {
+  return promise.then(
+    (value) => ({ status: "fulfilled", value }),
+    (reason: unknown) => ({ status: "rejected", reason })
+  );
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown request failure.";
 }
@@ -89,8 +98,9 @@ export default function App() {
   const [moduleData, setModuleData] = useState<ModuleDataResponse | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
-  const refreshFirstSymbolRef = useRef<string | null>(null);
   const moduleDataCacheRef = useRef<Record<string, ModuleDataResponse>>({});
+  const cachePrimingSymbolRef = useRef<string | null>(null);
+  const [pendingModuleAnchor, setPendingModuleAnchor] = useState<string | null>(null);
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
@@ -170,7 +180,7 @@ export default function App() {
       setChart(null);
       return;
     }
-    if (refreshFirstSymbolRef.current === selectedSymbol) {
+    if (cachePrimingSymbolRef.current === selectedSymbol) {
       return;
     }
     setOverviewLoading(true);
@@ -205,6 +215,70 @@ export default function App() {
         setBoardError(errorMessage(error));
       });
   }, [selectedSymbol, chartIndicatorKey, chartPeriod]);
+
+  const loadSymbolCache = useCallback(async (symbol: string | null) => {
+    if (!symbol) {
+      return;
+    }
+    setOverviewLoading(true);
+    setChartLoading(true);
+    setOverviewError(null);
+    setChartError(null);
+    setBoardError(null);
+    try {
+      const [overviewResult, chartResult, boardsResult, moduleResults] = await Promise.all([
+        settleRequest(fetchSecurityOverview(symbol)),
+        settleRequest(fetchSecurityChart(symbol, chartIndicators, chartPeriod)),
+        settleRequest(fetchSecurityBoards(symbol)),
+        settleRequest(Promise.allSettled(modulePrefetchModules.map((moduleId) => fetchModuleData(moduleId, symbol)))),
+      ]);
+      if (overviewResult.status === "fulfilled") {
+        setOverview(overviewResult.value);
+      } else {
+        setOverview(null);
+        setOverviewError(errorMessage(overviewResult.reason));
+      }
+      if (chartResult.status === "fulfilled") {
+        setChart(chartResult.value);
+      } else {
+        setChart(null);
+        setChartError(errorMessage(chartResult.reason));
+      }
+      if (boardsResult.status === "fulfilled") {
+        setBoards(boardsResult.value);
+        setBoardError(null);
+      } else {
+        setBoards(null);
+        setBoardError(errorMessage(boardsResult.reason));
+      }
+      const prefetched: Record<string, ModuleDataResponse> = {};
+      const settledModuleResults = moduleResults.status === "fulfilled" ? moduleResults.value : [];
+      settledModuleResults.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          const moduleId = modulePrefetchModules[index];
+          prefetched[moduleCacheKey(moduleId, symbol)] = result.value;
+        }
+      });
+      if (Object.keys(prefetched).length > 0) {
+        moduleDataCacheRef.current = { ...moduleDataCacheRef.current, ...prefetched };
+        const activePrefetched = prefetched[moduleCacheKey(activeModule, symbol)];
+        if (activeView === "module" && activePrefetched) {
+          setModuleData(activePrefetched);
+          setModuleError(null);
+        }
+      }
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      setOverviewError(message);
+      setChartError(message);
+    } finally {
+      setOverviewLoading(false);
+      setChartLoading(false);
+      if (cachePrimingSymbolRef.current === symbol) {
+        cachePrimingSymbolRef.current = null;
+      }
+    }
+  }, [activeModule, activeView, chartIndicators, chartIndicatorKey, chartPeriod]);
 
   const loadModule = useCallback(() => {
     const cacheKey = moduleCacheKey(activeModule, selectedSymbol);
@@ -258,13 +332,46 @@ export default function App() {
   }, [activeView, loadModule]);
 
   useEffect(() => {
+    if (activeView !== "module" || !pendingModuleAnchor || moduleLoading) {
+      return;
+    }
+    let cancelled = false;
+    let retryTimer: number | null = null;
+    let attempts = 0;
+    const scrollToAnchor = () => {
+      if (cancelled) {
+        return;
+      }
+      const target = document.getElementById(pendingModuleAnchor);
+      if (!target) {
+        attempts += 1;
+        if (attempts < 24) {
+          retryTimer = window.setTimeout(scrollToAnchor, 150);
+        }
+        return;
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("module-anchor-highlight");
+      window.setTimeout(() => target.classList.remove("module-anchor-highlight"), 1600);
+      setPendingModuleAnchor(null);
+    };
+    retryTimer = window.setTimeout(scrollToAnchor, 80);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [activeView, pendingModuleAnchor, moduleLoading, moduleData]);
+
+  useEffect(() => {
     if (activeView === "system") {
       loadSystem();
     }
   }, [activeView, loadSystem]);
 
   function handleSelectSymbol(symbol: string, keepCurrentModule = false) {
-    refreshFirstSymbolRef.current = symbol;
+    cachePrimingSymbolRef.current = symbol;
     setSelectedSymbol(symbol);
     setQuery("");
     setSearchResults([]);
@@ -277,11 +384,19 @@ export default function App() {
     setOverviewError(null);
     setChartError(null);
     setBoardError(null);
-    void runFullRefresh(symbol);
+    void loadSymbolCache(symbol).finally(() => {
+      void runFullRefresh(symbol);
+    });
   }
 
   function refreshCurrentView() {
     void runFullRefresh();
+  }
+
+  function openModuleSnapshot(moduleId: string, anchorId?: string | null) {
+    setActiveModule(moduleId);
+    setActiveView("module");
+    setPendingModuleAnchor(anchorId ?? `module-${moduleId}-top`);
   }
 
   async function runFullRefresh(targetSymbol = selectedSymbol) {
@@ -300,42 +415,31 @@ export default function App() {
         setUpdateProgress({ active: true, percent: 12, message: "Building free-stockdb symbol directory..." });
         await refreshSecurityUniverse();
       }
-      setUpdateProgress({ active: true, percent: 35, message: "Refreshing market and K-line data..." });
-      await refreshSecurity(targetSymbol, false);
-      setUpdateProgress({ active: true, percent: 50, message: "Updating market view..." });
-      const boardsPromise = fetchSecurityBoards(targetSymbol)
-        .then((response) => {
-          setBoards(response);
-          setBoardError(null);
-        })
-        .catch((error: unknown) => {
-          setBoards(null);
-          setBoardError(errorMessage(error));
-        });
-      const [initialOverviewResponse, chartResponse] = await Promise.all([
-        fetchSecurityOverview(targetSymbol),
-        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod)
-      ]);
-      setOverview(initialOverviewResponse);
-      setChart(chartResponse);
-      setOverviewLoading(false);
-      setChartLoading(false);
-      setUpdateProgress({ active: true, percent: 62, message: "Refreshing module data..." });
+      setUpdateProgress({ active: true, percent: 35, message: "Refreshing market and module data..." });
       const refreshModules = shouldRefreshEtfOptions(activeModule, targetSymbol)
         ? [...backgroundRefreshModules, "etf_options"]
         : backgroundRefreshModules;
-      const moduleResults = await Promise.allSettled(refreshModules.map((moduleId) => refreshModule(moduleId, targetSymbol)));
-      moduleResults.forEach((result, index) => {
+      const refreshTasks = [
+        { id: "market", task: refreshSecurity(targetSymbol, false) },
+        ...refreshModules.map((moduleId) => ({ id: moduleId, task: refreshModule(moduleId, targetSymbol) })),
+      ];
+      const refreshResults = await Promise.allSettled(refreshTasks.map((entry) => entry.task));
+      refreshResults.forEach((result, index) => {
         if (result.status === "rejected") {
-          failures.push(refreshModules[index]);
+          failures.push(refreshTasks[index].id);
         }
       });
-      setUpdateProgress({ active: true, percent: 85, message: "Updating module snapshots..." });
-      const [overviewResponse, prefetchResults] = await Promise.all([
+      setUpdateProgress({ active: true, percent: 78, message: "Updating cached snapshots..." });
+      const [overviewResult, chartResult, boardsResult, prefetchResults] = await Promise.all([
         fetchSecurityOverview(targetSymbol),
+        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod),
+        fetchSecurityBoards(targetSymbol),
         Promise.allSettled(modulePrefetchModules.map((moduleId) => fetchModuleData(moduleId, targetSymbol)))
       ]);
-      setOverview(overviewResponse);
+      setOverview(overviewResult);
+      setChart(chartResult);
+      setBoards(boardsResult);
+      setBoardError(null);
       const prefetched: Record<string, ModuleDataResponse> = {};
       prefetchResults.forEach((result, index) => {
         const moduleId = modulePrefetchModules[index];
@@ -353,7 +457,6 @@ export default function App() {
           setModuleError(null);
         }
       }
-      await boardsPromise;
       await fetchSourceHealth()
         .then((response) => setSources(response.rows))
         .catch(() => setSources([]));
@@ -368,9 +471,6 @@ export default function App() {
       setChartError(message);
       setToast({ kind: "failed", message });
     } finally {
-      if (refreshFirstSymbolRef.current === targetSymbol) {
-        refreshFirstSymbolRef.current = null;
-      }
       setOverviewLoading(false);
       setChartLoading(false);
       setMarketRefreshing(false);
@@ -457,6 +557,7 @@ export default function App() {
               isSearching={isSearching}
               onSearchQueryChange={setQuery}
               onSelectSymbol={(symbol) => handleSelectSymbol(symbol)}
+              onOpenModuleSnapshot={openModuleSnapshot}
               apiHealthError={apiHealthError}
             />
           )}

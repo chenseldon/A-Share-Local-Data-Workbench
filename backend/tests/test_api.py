@@ -165,6 +165,22 @@ def test_security_overview_returns_ordered_module_snapshots(tmp_path: Path) -> N
                 ),
                 ModuleRecord(
                     module="news",
+                    source="eastmoney_stock_news",
+                    data_key="em-stock-1",
+                    symbol="600519.SH",
+                    record_date="2026-07-15",
+                    payload={
+                        "title": "Stock item",
+                        "time": "2026-07-15 10:01:00",
+                        "media": "Eastmoney",
+                        "url": "https://finance.eastmoney.com/a/202607153812653431.html",
+                        "source": "eastmoney_stock_news",
+                    },
+                    fetched_at=fetched_at,
+                    raw_payload_hash="news-hash-0",
+                ),
+                ModuleRecord(
+                    module="news",
                     source="cls_telegraph",
                     data_key="cls-1",
                     symbol=None,
@@ -257,9 +273,35 @@ def test_security_overview_returns_ordered_module_snapshots(tmp_path: Path) -> N
             "Chip And Liquidity Snapshot",
             "Signals Snapshot",
         ]
+        assert snapshots[0]["target_module"] == "fundamentals"
+        assert snapshots[0]["target_anchor"] == "module-fundamentals-top"
         fundamental_rows = snapshots[0]["tables"][0]["rows"]
-        assert {row["statement_type"] for row in fundamental_rows} == {"Income Statement", "Balance Sheet", "Cash Flow"}
-        assert snapshots[2]["tables"][0]["rows"][0]["title"] == "CLS item"
+        fundamental_columns = snapshots[0]["tables"][0]["columns"]
+        assert "statement_type" not in {column["key"] for column in fundamental_columns}
+        assert "Statement" not in {column["label"] for column in fundamental_columns}
+        assert fundamental_rows == [
+            {
+                "report_period": "2026-06-30",
+                "source": "sina_financial_report",
+                "fetched_at": fetched_at.isoformat(),
+                "revenue": 100.0,
+                "net_profit": 30.0,
+                "total_assets": 500.0,
+                "total_liabilities": 120.0,
+                "operating_cash_flow": 40.0,
+                "cash_change": 5.0,
+            }
+        ]
+        assert snapshots[2]["target_module"] == "news"
+        assert [table["title"] for table in snapshots[2]["tables"]] == [
+            "Eastmoney Stock News",
+            "CLS Telegrams",
+            "Eastmoney Global News",
+        ]
+        assert snapshots[2]["tables"][0]["target_anchor"] == "module-news-table-stock_news"
+        assert snapshots[2]["tables"][0]["rows"][0]["title"] == "Stock item"
+        assert snapshots[2]["tables"][1]["rows"][0]["title"] == "CLS item"
+        assert snapshots[2]["tables"][2]["rows"][0]["title"] == "Global item"
         assert snapshots[4]["tables"][0]["rows"][0]["margin_balance"] == 1000.0
         assert [row["rank"] for row in snapshots[5]["tables"][1]["rows"]] == [1, 2]
 

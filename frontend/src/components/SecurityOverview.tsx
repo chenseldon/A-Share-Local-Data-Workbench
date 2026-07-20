@@ -26,6 +26,7 @@ interface SecurityOverviewProps {
   isSearching: boolean;
   onSearchQueryChange: (value: string) => void;
   onSelectSymbol: (symbol: string) => void;
+  onOpenModuleSnapshot: (moduleId: string, anchorId?: string | null) => void;
   apiHealthError: string | null;
 }
 
@@ -87,18 +88,39 @@ function renderLinkedTitle(value: unknown, column: { key: string }, row: DataRow
   );
 }
 
-function renderModuleSnapshot(snapshot: NonNullable<SecurityOverviewType["module_snapshots"]>[number]) {
+function renderSnapshotTitle(
+  label: string,
+  moduleId: string | null | undefined,
+  anchorId: string | null | undefined,
+  onOpenModuleSnapshot: (moduleId: string, anchorId?: string | null) => void,
+  className: string
+) {
+  if (!moduleId) {
+    return label;
+  }
+  return (
+    <button className={className} type="button" onClick={() => onOpenModuleSnapshot(moduleId, anchorId)}>
+      {label}
+    </button>
+  );
+}
+
+function renderModuleSnapshot(
+  snapshot: NonNullable<SecurityOverviewType["module_snapshots"]>[number],
+  onOpenModuleSnapshot: (moduleId: string, anchorId?: string | null) => void
+) {
+  const moduleId = snapshot.target_module ?? snapshot.module;
   return (
     <section key={snapshot.module} className="panel security-module-snapshot-panel">
       <div className="section-heading">
         <div>
-          <h2>{snapshot.title}</h2>
+          <h2>{renderSnapshotTitle(snapshot.title, moduleId, snapshot.target_anchor, onOpenModuleSnapshot, "snapshot-heading-link")}</h2>
         </div>
       </div>
       <div className="security-snapshot-tables">
         {snapshot.tables.map((table) => (
           <div key={table.id} className="security-snapshot-table">
-            <h3>{table.title}</h3>
+            <h3>{renderSnapshotTitle(table.title, moduleId, table.target_anchor, onOpenModuleSnapshot, "snapshot-subheading-link")}</h3>
             <DataTable rows={table.rows} columns={table.columns} renderCell={renderLinkedTitle} />
           </div>
         ))}
@@ -128,6 +150,7 @@ export function SecurityOverview({
   isSearching,
   onSearchQueryChange,
   onSelectSymbol,
+  onOpenModuleSnapshot,
   apiHealthError
 }: SecurityOverviewProps) {
   if (!selectedSymbol) {
@@ -260,7 +283,7 @@ export function SecurityOverview({
         </section>
       )}
 
-      {moduleSnapshots.map(renderModuleSnapshot)}
+      {moduleSnapshots.map((snapshot) => renderModuleSnapshot(snapshot, onOpenModuleSnapshot))}
     </div>
   );
 }

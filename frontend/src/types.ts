@@ -169,6 +169,8 @@ export interface SecurityOverview {
 export interface SecurityModuleSnapshot {
   module: string;
   title: string;
+  target_module?: string | null;
+  target_anchor?: string | null;
   tables: ReportModuleTable[];
 }
 
@@ -268,6 +270,7 @@ export interface ReportModuleTableColumn {
 export interface ReportModuleTable {
   id: string;
   title: string;
+  target_anchor?: string | null;
   rows: DataRow[];
   columns: ReportModuleTableColumn[];
 }

@@ -1957,20 +1957,19 @@ class DataRepository:
         )
 
     def _fundamentals_snapshot(self, symbol: str) -> dict[str, Any]:
-        rows = [
-            {**row, "statement_type": _statement_type_label(row.get("statement_type"))}
-            for row in self._list_module_records_for_source("fundamentals", "sina_financial_report", symbol, 24)
-        ]
+        rows = self._merged_financial_statement_rows(symbol)
         return {
             "module": "fundamentals",
             "title": "Fundamentals Snapshot",
+            "target_module": "fundamentals",
+            "target_anchor": "module-fundamentals-top",
             "tables": [
                 {
                     "id": "financial_statements",
                     "title": "Financial Statements",
+                    "target_anchor": "module-fundamentals-table-income_statement",
                     "rows": rows,
                     "columns": [
-                        {"key": "statement_type", "label": "Statement"},
                         {"key": "report_period", "label": "Report period"},
                         {"key": "revenue", "label": "Revenue"},
                         {"key": "net_profit", "label": "Net profit"},
@@ -1987,14 +1986,52 @@ class DataRepository:
             ],
         }
 
+    def _merged_financial_statement_rows(self, symbol: str) -> list[dict[str, Any]]:
+        statement_rows = self._list_module_records_for_source("fundamentals", "sina_financial_report", symbol, 24)
+        rows_by_period: dict[str, dict[str, Any]] = {}
+        ordered_keys: list[str] = []
+        fields = [
+            "revenue",
+            "net_profit",
+            "eps",
+            "total_assets",
+            "total_liabilities",
+            "shareholder_equity",
+            "operating_cash_flow",
+            "cash_change",
+        ]
+        for row in statement_rows:
+            period = row.get("report_period") or row.get("record_date")
+            period_key = str(period or "NA")
+            if period_key not in rows_by_period:
+                ordered_keys.append(period_key)
+                rows_by_period[period_key] = {
+                    "report_period": period,
+                    "source": row.get("source"),
+                    "fetched_at": row.get("fetched_at"),
+                }
+            merged = rows_by_period[period_key]
+            for field in fields:
+                value = row.get(field)
+                if value not in (None, "", "-") and merged.get(field) in (None, "", "-"):
+                    merged[field] = value
+            if row.get("fetched_at") and (not merged.get("fetched_at") or str(row["fetched_at"]) > str(merged["fetched_at"])):
+                merged["fetched_at"] = row["fetched_at"]
+            if row.get("source") and not merged.get("source"):
+                merged["source"] = row["source"]
+        return [rows_by_period[key] for key in sorted(ordered_keys, reverse=True)]
+
     def _announcements_snapshot(self, symbol: str) -> dict[str, Any]:
         return {
             "module": "announcements",
             "title": "Announcements Snapshot",
+            "target_module": "announcements",
+            "target_anchor": "module-announcements-top",
             "tables": [
                 {
                     "id": "announcements",
                     "title": "CNINFO Announcements",
+                    "target_anchor": "module-announcements-table-cninfo_announcements",
                     "rows": self.list_announcements(symbol, limit=8),
                     "columns": [
                         {"key": "title", "label": "Title"},
@@ -2007,26 +2044,41 @@ class DataRepository:
         }
 
     def _news_snapshot(self, symbol: str) -> dict[str, Any]:
-        cls_rows = self._list_news_source_records(symbol, "cls_telegraph", 10)
-        global_rows = self._list_news_source_records(symbol, "eastmoney_global_news", 10)
-        rows = sorted(cls_rows + global_rows, key=lambda row: str(row.get("time") or row.get("record_date") or ""), reverse=True)
+        columns = [
+            {"key": "title", "label": "Title"},
+            {"key": "time", "label": "Time"},
+            {"key": "media", "label": "Media"},
+            {"key": "summary", "label": "Summary"},
+            {"key": "source", "label": "Source"},
+            {"key": "fetched_at", "label": "Fetched at"},
+        ]
         return {
             "module": "news",
             "title": "News Snapshot",
+            "target_module": "news",
+            "target_anchor": "module-news-top",
             "tables": [
                 {
-                    "id": "news_context",
-                    "title": "CLS + Eastmoney Global News",
-                    "rows": rows,
-                    "columns": [
-                        {"key": "title", "label": "Title"},
-                        {"key": "time", "label": "Time"},
-                        {"key": "media", "label": "Media"},
-                        {"key": "summary", "label": "Summary"},
-                        {"key": "source", "label": "Source"},
-                        {"key": "fetched_at", "label": "Fetched at"},
-                    ],
-                }
+                    "id": "eastmoney_stock_news",
+                    "title": "Eastmoney Stock News",
+                    "target_anchor": "module-news-table-stock_news",
+                    "rows": self._list_news_source_records(symbol, "eastmoney_stock_news", 8),
+                    "columns": columns,
+                },
+                {
+                    "id": "cls_telegraph",
+                    "title": "CLS Telegrams",
+                    "target_anchor": "module-news-table-cls_telegraph",
+                    "rows": self._list_news_source_records(symbol, "cls_telegraph", 8),
+                    "columns": columns,
+                },
+                {
+                    "id": "eastmoney_global_news",
+                    "title": "Eastmoney Global News",
+                    "target_anchor": "module-news-table-eastmoney_global_news",
+                    "rows": self._list_news_source_records(symbol, "eastmoney_global_news", 8),
+                    "columns": columns,
+                },
             ],
         }
 
@@ -2034,10 +2086,13 @@ class DataRepository:
         return {
             "module": "reports",
             "title": "Research Reports Snapshot",
+            "target_module": "reports",
+            "target_anchor": "module-reports-top",
             "tables": [
                 {
                     "id": "research_reports",
                     "title": "Company Reports",
+                    "target_anchor": "module-reports-table-stock_reports",
                     "rows": self.list_reports(symbol, limit=8),
                     "columns": [
                         {"key": "title", "label": "Title"},
@@ -2055,10 +2110,13 @@ class DataRepository:
         return {
             "module": "chip_liquidity",
             "title": "Chip And Liquidity Snapshot",
+            "target_module": "chip_liquidity",
+            "target_anchor": "module-chip_liquidity-top",
             "tables": [
                 {
                     "id": "margin_financing",
                     "title": "Margin Financing Detail",
+                    "target_anchor": "module-chip_liquidity-table-margin_financing",
                     "rows": self._list_module_records_for_source("chip_liquidity", "margin_trading", symbol, 5),
                     "columns": [
                         {"key": "date", "label": "Date"},
@@ -2073,6 +2131,7 @@ class DataRepository:
                 {
                     "id": "block_trades",
                     "title": "Block Trades",
+                    "target_anchor": "module-chip_liquidity-table-block_trades",
                     "rows": self._list_module_records_for_source("chip_liquidity", "block_trade", symbol, 5),
                     "columns": [
                         {"key": "date", "label": "Date"},
@@ -2088,6 +2147,7 @@ class DataRepository:
                 {
                     "id": "holder_count",
                     "title": "Holder Count Changes",
+                    "target_anchor": "module-chip_liquidity-table-holder_count",
                     "rows": self._list_module_records_for_source("chip_liquidity", "holder_num_change", symbol, 5),
                     "columns": [
                         {"key": "date", "label": "Date"},
@@ -2101,6 +2161,7 @@ class DataRepository:
                 {
                     "id": "dividends",
                     "title": "Dividend / Bonus History",
+                    "target_anchor": "module-chip_liquidity-table-dividends",
                     "rows": self._list_module_records_for_source("chip_liquidity", "dividend_history", symbol, 5),
                     "columns": [
                         {"key": "date", "label": "Date"},
@@ -2114,6 +2175,7 @@ class DataRepository:
                 {
                     "id": "fund_flow_120d",
                     "title": "120-Day Fund Flow",
+                    "target_anchor": "module-chip_liquidity-table-fund_flow_120d",
                     "rows": self.list_money_flow(symbol, limit=5),
                     "columns": [
                         {"key": "trade_date", "label": "Trade date"},
@@ -2134,10 +2196,13 @@ class DataRepository:
         return {
             "module": "signals",
             "title": "Signals Snapshot",
+            "target_module": "signals",
+            "target_anchor": "module-signals-top",
             "tables": [
                 {
                     "id": "minute_fund_flow",
                     "title": "Intraday Minute Fund Flow",
+                    "target_anchor": "module-signals-table-minute_fund_flow",
                     "rows": self._list_module_records_for_source("signals", "eastmoney_fund_flow_minute", symbol, 10),
                     "columns": [
                         {"key": "time", "label": "Time"},
@@ -2152,6 +2217,7 @@ class DataRepository:
                 {
                     "id": "industry_comparison",
                     "title": "Industry Comparison",
+                    "target_anchor": "module-signals-table-industry_comparison",
                     "rows": industry_rows,
                     "columns": [
                         {"key": "rank", "label": "Rank"},

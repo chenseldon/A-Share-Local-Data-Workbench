@@ -1284,6 +1284,49 @@ p {
   font-weight: 900;
 }
 
+.snapshot-heading-link,
+.snapshot-subheading-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.snapshot-heading-link:hover,
+.snapshot-heading-link:focus-visible,
+.snapshot-subheading-link:hover,
+.snapshot-subheading-link:focus-visible {
+  color: #37e2ee;
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.module-anchor-block {
+  min-width: 0;
+}
+
+.module-anchor-highlight {
+  animation: module-anchor-pulse 1.6s ease;
+  outline: 2px solid rgba(55, 226, 238, 0.88);
+  outline-offset: 3px;
+}
+
+@keyframes module-anchor-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(55, 226, 238, 0.38);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(55, 226, 238, 0);
+  }
+}
+
 .workspace-chart-only .module-market-strip .market-placeholders span,
 .workspace-chart-only .module-market-strip .market-placeholders button,
 .workspace-chart-only .tag-list span {

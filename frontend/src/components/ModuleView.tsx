@@ -10,6 +10,7 @@ import type {
   ModuleDataResponse,
   ModuleDefinition,
   ReportModuleSection,
+  ReportModuleTable,
   ReportModuleTableColumn,
   Security
 } from "../types";
@@ -121,13 +122,25 @@ function splitReportSections(sections: ReportModuleSection[]) {
   };
 }
 
-function renderReportSection(section: ReportModuleSection) {
+function moduleTopAnchor(moduleId: string): string {
+  return `module-${moduleId}-top`;
+}
+
+function moduleSectionAnchor(moduleId: string, sectionId: string): string {
+  return `module-${moduleId}-section-${sectionId}`;
+}
+
+function moduleTableAnchor(moduleId: string, tableId: string): string {
+  return `module-${moduleId}-table-${tableId}`;
+}
+
+function renderReportSection(section: ReportModuleSection, moduleId: string) {
   const cards = section.cards.filter((card) => !card.status);
   if (cards.length === 0) {
     return null;
   }
   return (
-    <section key={section.id} className="panel market-snapshot-panel module-report-section">
+    <section id={moduleSectionAnchor(moduleId, section.id)} key={section.id} className="panel market-snapshot-panel module-report-section">
       <div className="section-heading">
         <div>
           <h2>{section.title}</h2>
@@ -148,12 +161,25 @@ function renderReportSection(section: ReportModuleSection) {
   );
 }
 
-function SourceCapabilitiesPanel({ section }: { section: ReportModuleSection | undefined }) {
+function renderReportTable(table: ReportModuleTable, moduleId: string) {
+  return (
+    <section id={moduleTableAnchor(moduleId, table.id)} key={table.id} className="panel module-market-strip">
+      <div className="section-heading">
+        <div>
+          <h2>{table.title}</h2>
+        </div>
+      </div>
+      <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
+    </section>
+  );
+}
+
+function SourceCapabilitiesPanel({ section, moduleId }: { section: ReportModuleSection | undefined; moduleId: string }) {
   if (!section) {
     return null;
   }
   return (
-    <section className="panel market-snapshot-panel module-report-section">
+    <section id={moduleSectionAnchor(moduleId, section.id)} className="panel market-snapshot-panel module-report-section">
       <div className="section-heading">
         <div>
           <h2>{section.title}</h2>
@@ -175,9 +201,9 @@ function SourceCapabilitiesPanel({ section }: { section: ReportModuleSection | u
   );
 }
 
-function SourceStatusPanel({ sources }: { sources: MarketSourceStatus[] }) {
+function SourceStatusPanel({ sources, moduleId }: { sources: MarketSourceStatus[]; moduleId: string }) {
   return (
-    <section className="panel module-market-strip">
+    <section id={moduleSectionAnchor(moduleId, "source_status")} className="panel module-market-strip">
       <div className="section-heading">
         <div>
           <h2>Source Status</h2>
@@ -309,35 +335,37 @@ export function ModuleView({
 
     return (
       <div className="content-grid security-workspace-grid module-market-grid">
-        <KLineChart
-          rows={chart?.rows ?? []}
-          quote={quote}
-          security={security}
-          boards={boards}
-          boardError={boardError}
-          enabledIndicators={chartIndicators}
-          onIndicatorsChange={onChartIndicatorsChange}
-          period={chartPeriod}
-          onPeriodChange={onChartPeriodChange}
-          indicatorStatus={chart?.indicator_status}
-          indicatorError={chart?.indicator_error ?? null}
-          loading={chartLoading}
-          error={chartError}
-          onRefresh={onRefreshModule}
-          refreshing={moduleRefreshing}
-          searchQuery={searchQuery}
-          searchResults={searchResults}
-          isSearching={isSearching}
-          onSearchQueryChange={onSearchQueryChange}
-          onSelectSymbol={onSelectSymbol}
-          mode="market"
-        />
+        <div id={moduleTopAnchor(module.id)} className="module-anchor-block">
+          <KLineChart
+            rows={chart?.rows ?? []}
+            quote={quote}
+            security={security}
+            boards={boards}
+            boardError={boardError}
+            enabledIndicators={chartIndicators}
+            onIndicatorsChange={onChartIndicatorsChange}
+            period={chartPeriod}
+            onPeriodChange={onChartPeriodChange}
+            indicatorStatus={chart?.indicator_status}
+            indicatorError={chart?.indicator_error ?? null}
+            loading={chartLoading}
+            error={chartError}
+            onRefresh={onRefreshModule}
+            refreshing={moduleRefreshing}
+            searchQuery={searchQuery}
+            searchResults={searchResults}
+            isSearching={isSearching}
+            onSearchQueryChange={onSearchQueryChange}
+            onSelectSymbol={onSelectSymbol}
+            mode="market"
+          />
+        </div>
 
         {loading && <div className="panel loading-panel">Loading market module data...</div>}
         {error && <EmptyState title="Market module request failed" detail={error} />}
 
         {quoteItems.length > 0 && (
-          <section className="panel market-snapshot-panel">
+          <section id={moduleSectionAnchor(module.id, "quote_snapshot")} className="panel market-snapshot-panel">
             <div className="section-heading">
               <div>
                 <h2>Market Quote Snapshot</h2>
@@ -357,7 +385,7 @@ export function ModuleView({
           </section>
         )}
 
-        <section className="panel market-snapshot-panel">
+        <section id={moduleSectionAnchor(module.id, "valuation")} className="panel market-snapshot-panel">
           <div className="section-heading">
             <div>
               <h2>Valuation</h2>
@@ -376,7 +404,7 @@ export function ModuleView({
           </div>
         </section>
 
-        <section className="panel market-snapshot-panel">
+        <section id={moduleSectionAnchor(module.id, "price_limits")} className="panel market-snapshot-panel">
           <div className="section-heading">
             <div>
               <h2>Price Limits</h2>
@@ -395,7 +423,7 @@ export function ModuleView({
           </div>
         </section>
 
-        <section className="panel market-snapshot-panel">
+        <section id={moduleSectionAnchor(module.id, "liquidity")} className="panel market-snapshot-panel">
           <div className="section-heading">
             <div>
               <h2>Liquidity</h2>
@@ -414,7 +442,7 @@ export function ModuleView({
           </div>
         </section>
 
-        <section className="panel module-market-strip">
+        <section id={moduleSectionAnchor(module.id, "order_book")} className="panel module-market-strip">
           <div className="section-heading">
             <div>
               <h2>Order Book</h2>
@@ -428,7 +456,7 @@ export function ModuleView({
           </div>
         </section>
 
-        <section className="panel module-market-strip">
+        <section id={moduleSectionAnchor(module.id, "index_etf")} className="panel module-market-strip">
           <div className="section-heading">
             <div>
               <h2>Index / ETF Entrance</h2>
@@ -445,7 +473,7 @@ export function ModuleView({
           </div>
         </section>
 
-        <section className="panel module-market-strip">
+        <section id={moduleSectionAnchor(module.id, "source_status")} className="panel module-market-strip">
           <div className="section-heading">
             <div>
               <h2>Source Status</h2>
@@ -515,7 +543,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid module-fundamentals-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} - Eastmoney profile, Sina financial statements, and explicit optional mootdx finance/F10 status.</p>
@@ -535,24 +563,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleFundamentalsTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleFundamentalsTables.map((table) => renderReportTable(table, module.id))}
 
             {fundamentalsSections.length === 0 && visibleFundamentalsTables.length === 0 && (
               <EmptyState title="No fundamentals payload" detail="The fundamentals connector returned no structured sections or table rows for this symbol." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={fundamentalsPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={fundamentalsPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -619,7 +638,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid module-etf-options-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} · Sina ETF option chains, T-quotes, Greeks and implied volatility. Greeks and IV are source-provided; no local BSM pricing is performed.</p>
@@ -639,24 +658,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleOptionTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleOptionTables.map((table) => renderReportTable(table, module.id))}
 
             {optionSections.length === 0 && visibleOptionTables.length === 0 && (
               <EmptyState title="No ETF options payload" detail="Refresh the module to collect Sina ETF option chains, T-quotes, Greeks and implied volatility." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={optionsPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={optionsPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -709,7 +719,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid module-announcements-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} · CNINFO full-text announcements, disclosure detail links, mootdx F10 summary status and official backup-source boundaries.</p>
@@ -729,24 +739,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleAnnouncementTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleAnnouncementTables.map((table) => renderReportTable(table, module.id))}
 
             {announcementSections.length === 0 && visibleAnnouncementTables.length === 0 && (
               <EmptyState title="No announcements payload" detail="The announcements connector returned no structured sections or table rows for this symbol." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={announcementsPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={announcementsPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -799,7 +800,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid module-news-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} · Eastmoney stock news, CLS telegrams and Eastmoney global 7x24 news with mutual backup status.</p>
@@ -819,24 +820,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleNewsTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleNewsTables.map((table) => renderReportTable(table, module.id))}
 
             {newsSections.length === 0 && visibleNewsTables.length === 0 && (
               <EmptyState title="No news payload" detail="The news connectors returned no structured sections or table rows for this symbol." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={newsPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={newsPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -889,7 +881,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} · Eastmoney reportapi company and industry reports, PDF URL metadata, optional consensus EPS and iwencai status.</p>
@@ -909,24 +901,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleTables.map((table) => renderReportTable(table, module.id))}
 
             {reportSections.length === 0 && visibleTables.length === 0 && (
               <EmptyState title="No research report payload" detail="The reports connector returned no structured sections or table rows for this symbol." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={reportsPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={reportsPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -979,7 +962,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid module-signals-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} · Eastmoney block ownership, intraday fund flow, dragon-tiger records, industry rotation and explicit source boundaries.</p>
@@ -999,24 +982,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleSignalTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleSignalTables.map((table) => renderReportTable(table, module.id))}
 
             {signalSections.length === 0 && visibleSignalTables.length === 0 && (
               <EmptyState title="No signals payload" detail="The signals connector returned no structured sections or table rows for this symbol." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={signalsPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={signalsPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -1069,7 +1043,7 @@ export function ModuleView({
 
     return (
       <div className="content-grid module-reports-grid module-chip-grid">
-        <section className="panel hero-panel module-dark-hero">
+        <section id={moduleTopAnchor(module.id)} className="panel hero-panel module-dark-hero">
           <div>
             <h1>{module.label}</h1>
             <p>{module.layer} · Eastmoney datacenter margin, block trade, shareholder, dividend and 120-day fund-flow sources with explicit cache status.</p>
@@ -1089,24 +1063,15 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {contentSections.map(renderReportSection)}
+            {contentSections.map((section) => renderReportSection(section, module.id))}
 
-            {visibleChipTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
+            {visibleChipTables.map((table) => renderReportTable(table, module.id))}
 
             {chipSections.length === 0 && visibleChipTables.length === 0 && (
               <EmptyState title="No chip/liquidity payload" detail="The chip and liquidity connector returned no structured sections or table rows for this symbol." />
             )}
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={chipPayload?.source_status ?? []} />
+            <SourceCapabilitiesPanel section={sourceCapabilities} moduleId={module.id} />
+            <SourceStatusPanel sources={chipPayload?.source_status ?? []} moduleId={module.id} />
           </>
         )}
       </div>
@@ -1115,7 +1080,7 @@ export function ModuleView({
 
   return (
     <div className="content-grid">
-      <section className="panel hero-panel">
+      <section id={moduleTopAnchor(module.id)} className="panel hero-panel">
         <div>
           <h1>{module.label}</h1>
           <p>{module.layer} · {module.description}</p>

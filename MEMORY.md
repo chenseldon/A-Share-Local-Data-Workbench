@@ -63,6 +63,10 @@
 - Selecting a symbol now refreshes symbol-scoped research modules concurrently and prefetches the 8 module data payloads into a front-end cache after the Security View market/K-line panel has rendered, so module latency no longer blocks the first visible view.
 - Structured module UIs show business sections and tables first, then Source Capabilities and Source Status as the final panels. Business metric cards should not duplicate connector status badges such as `Connector fresh`; connector health belongs only in Source Capabilities and Source Status.
 - Security View module snapshots follow the 8-module sidebar order after Market Snapshot, currently rendering Fundamentals, Announcements, News, Research Reports, Chip/Liquidity and Signals snapshots; ETF Options intentionally has no Security View snapshot yet.
+- Symbol selection now strictly reads DuckDB cache first for Security overview/chart/boards and module payloads, then starts the background market/module refresh. After refresh completes, the frontend rereads overview and module payloads so Security snapshots stay synchronized with module cache without DOM copying.
+- Security View snapshot titles carry internal navigation metadata. Parent snapshot titles switch to the target module top; child table titles switch to the matching Module table/section anchor and briefly highlight the destination after asynchronous module data mounts.
+- Fundamentals Security Snapshot merges Sina income statement, balance sheet and cash flow rows by `report_period` into one wide financial statements table without a `Statement` column. The Fundamentals Module page still keeps the original statement-specific tables.
+- News Security Snapshot is split into Eastmoney Stock News, CLS Telegrams and Eastmoney Global News tables, each capped at 8 cached rows. External title URLs remain normal new-tab links; snapshot headings are reserved for in-app navigation.
 
 ## Secrets
 - No secrets are stored in this project memory.
