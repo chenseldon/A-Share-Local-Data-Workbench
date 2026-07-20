@@ -103,6 +103,167 @@ def test_seeded_search_and_overview(tmp_path: Path) -> None:
         assert market.json()["status"] == "ok"
 
 
+def test_security_overview_returns_ordered_module_snapshots(tmp_path: Path) -> None:
+    db_path = tmp_path / "overview-snapshots.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        seed_demo_data(db_path)
+        repository = DataRepository(db_path)
+        repository.save_module_records(
+            [
+                ModuleRecord(
+                    module="fundamentals",
+                    source="sina_financial_report",
+                    data_key="lrb-2026-06-30",
+                    symbol="600519.SH",
+                    record_date="2026-06-30",
+                    payload={
+                        "symbol": "600519.SH",
+                        "statement_type": "lrb",
+                        "report_period": "2026-06-30",
+                        "revenue": 100.0,
+                        "net_profit": 30.0,
+                        "source": "sina_financial_report",
+                    },
+                    fetched_at=fetched_at,
+                    raw_payload_hash="fundamental-hash-1",
+                ),
+                ModuleRecord(
+                    module="fundamentals",
+                    source="sina_financial_report",
+                    data_key="fzb-2026-06-30",
+                    symbol="600519.SH",
+                    record_date="2026-06-30",
+                    payload={
+                        "symbol": "600519.SH",
+                        "statement_type": "fzb",
+                        "report_period": "2026-06-30",
+                        "total_assets": 500.0,
+                        "total_liabilities": 120.0,
+                        "source": "sina_financial_report",
+                    },
+                    fetched_at=fetched_at,
+                    raw_payload_hash="fundamental-hash-2",
+                ),
+                ModuleRecord(
+                    module="fundamentals",
+                    source="sina_financial_report",
+                    data_key="llb-2026-06-30",
+                    symbol="600519.SH",
+                    record_date="2026-06-30",
+                    payload={
+                        "symbol": "600519.SH",
+                        "statement_type": "llb",
+                        "report_period": "2026-06-30",
+                        "operating_cash_flow": 40.0,
+                        "cash_change": 5.0,
+                        "source": "sina_financial_report",
+                    },
+                    fetched_at=fetched_at,
+                    raw_payload_hash="fundamental-hash-3",
+                ),
+                ModuleRecord(
+                    module="news",
+                    source="cls_telegraph",
+                    data_key="cls-1",
+                    symbol=None,
+                    record_date="2026-07-15",
+                    payload={"title": "CLS item", "time": "2026-07-15 10:00:00", "media": "CLS", "source": "cls_telegraph"},
+                    fetched_at=fetched_at,
+                    raw_payload_hash="news-hash-1",
+                ),
+                ModuleRecord(
+                    module="news",
+                    source="eastmoney_global_news",
+                    data_key="em-global-1",
+                    symbol=None,
+                    record_date="2026-07-15",
+                    payload={
+                        "title": "Global item",
+                        "time": "2026-07-15 09:59:00",
+                        "media": "Eastmoney",
+                        "url": "https://finance.eastmoney.com/a/202607153812653432.html",
+                        "source": "eastmoney_global_news",
+                    },
+                    fetched_at=fetched_at,
+                    raw_payload_hash="news-hash-2",
+                ),
+                ModuleRecord(
+                    module="chip_liquidity",
+                    source="margin_trading",
+                    data_key="margin-1",
+                    symbol="600519.SH",
+                    record_date="2026-07-15",
+                    payload={"date": "2026-07-15", "margin_balance": 1000.0, "source": "margin_trading"},
+                    fetched_at=fetched_at,
+                    raw_payload_hash="chip-hash-1",
+                ),
+                ModuleRecord(
+                    module="signals",
+                    source="eastmoney_fund_flow_minute",
+                    data_key="flow-1",
+                    symbol="600519.SH",
+                    record_date="2026-07-15",
+                    payload={"time": "10:30", "main_net": 100.0, "source": "eastmoney_fund_flow_minute"},
+                    fetched_at=fetched_at,
+                    raw_payload_hash="signal-hash-1",
+                ),
+                ModuleRecord(
+                    module="signals",
+                    source="eastmoney_industry_comparison",
+                    data_key="industry-2",
+                    symbol="600519.SH",
+                    record_date="2026-07-15",
+                    payload={"rank": 2, "name": "Food", "source": "eastmoney_industry_comparison"},
+                    fetched_at=fetched_at,
+                    raw_payload_hash="signal-hash-2",
+                ),
+                ModuleRecord(
+                    module="signals",
+                    source="eastmoney_industry_comparison",
+                    data_key="industry-1",
+                    symbol="600519.SH",
+                    record_date="2026-07-15",
+                    payload={"rank": 1, "name": "Liquor", "source": "eastmoney_industry_comparison"},
+                    fetched_at=fetched_at,
+                    raw_payload_hash="signal-hash-3",
+                ),
+            ]
+        )
+        repository.save_money_flow(
+            [
+                {
+                    "symbol": "600519.SH",
+                    "trade_date": "2026-07-15",
+                    "main_net_inflow": 100.0,
+                    "retail_net_inflow": -20.0,
+                    "turnover_rate": 1.2,
+                    "source": "stock_fund_flow_120d",
+                    "raw_payload_hash": "flow-hash-1",
+                }
+            ],
+            fetched_at,
+        )
+
+        overview = client.get("/api/security/600519.SH/overview")
+        assert overview.status_code == 200
+        snapshots = overview.json()["module_snapshots"]
+        assert [snapshot["title"] for snapshot in snapshots] == [
+            "Fundamentals Snapshot",
+            "Announcements Snapshot",
+            "News Snapshot",
+            "Research Reports Snapshot",
+            "Chip And Liquidity Snapshot",
+            "Signals Snapshot",
+        ]
+        fundamental_rows = snapshots[0]["tables"][0]["rows"]
+        assert {row["statement_type"] for row in fundamental_rows} == {"Income Statement", "Balance Sheet", "Cash Flow"}
+        assert snapshots[2]["tables"][0]["rows"][0]["title"] == "CLS item"
+        assert snapshots[4]["tables"][0]["rows"][0]["margin_balance"] == 1000.0
+        assert [row["rank"] for row in snapshots[5]["tables"][1]["rows"]] == [1, 2]
+
+
 def test_seed_is_idempotent(tmp_path: Path) -> None:
     db_path = tmp_path / "idempotent.duckdb"
     app = create_app(db_path)
@@ -578,6 +739,44 @@ def test_signals_refresh_is_best_effort(tmp_path: Path, monkeypatch) -> None:
         assert data.status_code == 200
         source_status = data.json()["signals"]["source_status"]
         assert any(row["source"] == "eastmoney_fund_flow_minute" and row["status"] == "failed" for row in source_status)
+
+
+def test_module_refresh_only_updates_requested_module(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "module-refresh-scope.duckdb"
+    fetched_at = datetime(2026, 7, 15, 10, 30, 0)
+    forbidden_calls: list[str] = []
+
+    def forbidden_fundamentals(symbol: str) -> dict[str, object]:
+        forbidden_calls.append(symbol)
+        return {}
+
+    monkeypatch.setattr("app.main.eastmoney_stock_info", forbidden_fundamentals)
+    monkeypatch.setattr(
+        "app.main.eastmoney_stock_news",
+        lambda symbol: [
+            ModuleRecord(
+                module="news",
+                source="eastmoney_stock_news",
+                data_key="news-1",
+                symbol=symbol,
+                record_date="2026-07-15",
+                payload={"symbol": symbol, "title": "Scoped news", "source": "eastmoney_stock_news"},
+                fetched_at=fetched_at,
+                raw_payload_hash="news-hash-1",
+            )
+        ],
+    )
+    monkeypatch.setattr("app.main.cls_telegraph", lambda: [])
+    monkeypatch.setattr("app.main.eastmoney_global_news", lambda: [])
+
+    app = create_app(db_path)
+    with TestClient(app) as client:
+        refresh = client.post("/api/modules/news/refresh?symbol=600519.SH")
+        assert refresh.status_code == 200
+        payload = refresh.json()
+        assert payload["status"] == "fresh"
+        assert payload["records_written"] == 1
+        assert forbidden_calls == []
 
 
 class _FakeJsonResponse:

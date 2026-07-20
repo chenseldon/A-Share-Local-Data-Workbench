@@ -162,7 +162,14 @@ export interface SecurityOverview {
   announcements: Announcement[];
   reports: ResearchReport[];
   money_flow: MoneyFlow[];
+  module_snapshots?: SecurityModuleSnapshot[];
   freshness: Record<string, FreshnessState>;
+}
+
+export interface SecurityModuleSnapshot {
+  module: string;
+  title: string;
+  tables: ReportModuleTable[];
 }
 
 export interface SearchResponse {

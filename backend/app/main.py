@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -360,49 +362,73 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
         if not symbol:
             raise ValueError("Fundamentals refresh requires a symbol.")
         fetched_at = datetime.now(UTC)
-        info = eastmoney_stock_info(symbol)
-        records_written = repository.save_eastmoney_stock_info(symbol, info, fetched_at)
-        records_written += repository.save_module_records([normalize_eastmoney_stock_profile(symbol, info, fetched_at)])
-        statement_records = []
-        for report_type in ("lrb", "fzb", "llb"):
-            try:
-                records = sina_financial_report(symbol, report_type=report_type, num=4)
-                repository.record_source_success("fundamentals", f"sina_financial_report:{report_type}", len(records))
-                statement_records.extend(records)
-            except AStockSourceError as exc:
-                repository.record_source_failure("fundamentals", f"sina_financial_report:{report_type}", str(exc))
-        records_written += repository.save_module_records(statement_records)
-        return {"module": module_id, "symbol": symbol, "status": "fresh", "records_written": records_written}
+        records_written = 0
+        optional_results: dict[str, object] = {}
+        fetchers: tuple[tuple[str, Callable[[], Any]], ...] = (
+            ("eastmoney_stock_info", lambda: eastmoney_stock_info(symbol)),
+            ("sina_financial_report:lrb", lambda: sina_financial_report(symbol, report_type="lrb", num=4)),
+            ("sina_financial_report:fzb", lambda: sina_financial_report(symbol, report_type="fzb", num=4)),
+            ("sina_financial_report:llb", lambda: sina_financial_report(symbol, report_type="llb", num=4)),
+        )
+        for source, result in _fetch_sources_concurrently(fetchers):
+            if result["status"] == "failed":
+                repository.record_source_failure("fundamentals", source, str(result["error"]))
+                if source == "eastmoney_stock_info":
+                    repository.record_source_failure("fundamentals", "eastmoney_stock_profile", str(result["error"]))
+                optional_results[source] = {"status": "failed", "error": str(result["error"])}
+                continue
+            value = result["value"]
+            if source == "eastmoney_stock_info":
+                info = value
+                written = repository.save_eastmoney_stock_info(symbol, info, fetched_at)
+                written += repository.save_module_records([normalize_eastmoney_stock_profile(symbol, info, fetched_at)])
+                if written == 0:
+                    repository.record_source_success("fundamentals", "eastmoney_stock_info", 0)
+                    repository.record_source_success("fundamentals", "eastmoney_stock_profile", 0)
+                records_written += written
+                optional_results[source] = {"status": "fresh", "records_written": written}
+                optional_results["eastmoney_stock_profile"] = {"status": "fresh", "records_written": 1 if written else 0}
+                continue
+            records = value
+            written = repository.save_module_records(records)
+            repository.record_source_success("fundamentals", source, len(records))
+            records_written += written
+            optional_results[source] = {"status": "fresh", "records_written": written}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
+        return {"module": module_id, "symbol": symbol, "status": status, "records_written": records_written, "optional_results": optional_results}
 
     if module_id == "reports":
         if not symbol:
             raise ValueError("Reports refresh requires a symbol.")
         fetched_at = datetime.now(UTC)
-        reports = [normalize_eastmoney_report(symbol, record, fetched_at) for record in eastmoney_reports(symbol, max_pages=1)]
-        records_written = repository.save_reports(reports)
-        if not reports:
-            repository.record_source_success("reports", "eastmoney_reports", 0)
         optional_results: dict[str, object] = {}
-        try:
-            industry_records = [
-                normalize_eastmoney_industry_report(symbol, record, fetched_at)
-                for record in eastmoney_industry_reports(industry_code="*", max_pages=1)
-            ]
-            industry_written = repository.save_module_records(industry_records)
-            if not industry_records:
-                repository.record_source_success("reports", "eastmoney_industry_reports", 0)
-            optional_results["eastmoney_industry_reports"] = {
-                "status": "fresh",
-                "records_written": industry_written,
-            }
-            records_written += industry_written
-        except AStockSourceError as exc:
-            repository.record_source_failure("reports", "eastmoney_industry_reports", str(exc))
-            optional_results["eastmoney_industry_reports"] = {"status": "failed", "error": str(exc)}
+        records_written = 0
+        fetchers = (
+            ("eastmoney_reports", lambda: eastmoney_reports(symbol, max_pages=1)),
+            ("eastmoney_industry_reports", lambda: eastmoney_industry_reports(industry_code="*", max_pages=1)),
+        )
+        for source, result in _fetch_sources_concurrently(fetchers, max_workers=2):
+            if result["status"] == "failed":
+                repository.record_source_failure("reports", source, str(result["error"]))
+                optional_results[source] = {"status": "failed", "error": str(result["error"])}
+                continue
+            if source == "eastmoney_reports":
+                reports = [normalize_eastmoney_report(symbol, record, fetched_at) for record in result["value"]]
+                written = repository.save_reports(reports)
+                if not reports:
+                    repository.record_source_success("reports", source, 0)
+            else:
+                industry_records = [normalize_eastmoney_industry_report(symbol, record, fetched_at) for record in result["value"]]
+                written = repository.save_module_records(industry_records)
+                if not industry_records:
+                    repository.record_source_success("reports", source, 0)
+            records_written += written
+            optional_results[source] = {"status": "fresh", "records_written": written}
+        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
         return {
             "module": module_id,
             "symbol": symbol,
-            "status": "fresh",
+            "status": status,
             "records_written": records_written,
             "optional_results": optional_results,
         }
@@ -428,17 +454,17 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             ("eastmoney_dragon_tiger_board", lambda: eastmoney_dragon_tiger_board(symbol)),
             ("eastmoney_industry_comparison", lambda: eastmoney_industry_comparison(symbol)),
         )
-        for source, fetcher in fetchers:
-            try:
-                records = fetcher()
-                written = repository.save_module_records(records)
-                if not records:
-                    repository.record_source_success("signals", source, 0)
-                records_written += written
-                optional_results[source] = {"status": "fresh", "records_written": written}
-            except AStockSourceError as exc:
-                repository.record_source_failure("signals", source, str(exc))
-                optional_results[source] = {"status": "failed", "error": str(exc)}
+        for source, result in _fetch_sources_concurrently(fetchers):
+            if result["status"] == "failed":
+                repository.record_source_failure("signals", source, str(result["error"]))
+                optional_results[source] = {"status": "failed", "error": str(result["error"])}
+                continue
+            records = result["value"]
+            written = repository.save_module_records(records)
+            if not records:
+                repository.record_source_success("signals", source, 0)
+            records_written += written
+            optional_results[source] = {"status": "fresh", "records_written": written}
         try:
             boards = fetch_free_stockdb_board_mapping(symbol)
             repository.update_security_sector(
@@ -473,17 +499,17 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
                 ("eastmoney_global_news", eastmoney_global_news),
             )
         )
-        for source, fetcher in fetchers:
-            try:
-                records = fetcher()  # type: ignore[operator]
-                written = repository.save_module_records(records)
-                if not records:
-                    repository.record_source_success("news", source, 0)
-                records_written += written
-                optional_results[source] = {"status": "fresh", "records_written": written}
-            except AStockSourceError as exc:
-                repository.record_source_failure("news", source, str(exc))
-                optional_results[source] = {"status": "failed", "error": str(exc)}
+        for source, result in _fetch_sources_concurrently(fetchers):
+            if result["status"] == "failed":
+                repository.record_source_failure("news", source, str(result["error"]))
+                optional_results[source] = {"status": "failed", "error": str(result["error"])}
+                continue
+            records = result["value"]
+            written = repository.save_module_records(records)
+            if not records:
+                repository.record_source_success("news", source, 0)
+            records_written += written
+            optional_results[source] = {"status": "fresh", "records_written": written}
         status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
         return {
             "module": module_id,
@@ -505,27 +531,21 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             ("holder_num_change", lambda: holder_num_change(symbol)),
             ("dividend_history", lambda: dividend_history(symbol)),
         )
-        for source, fetcher in record_fetchers:
-            try:
-                records = fetcher()
-                written = repository.save_module_records(records)
-                if not records:
-                    repository.record_source_success("chip_liquidity", source, 0)
-                records_written += written
-                optional_results[source] = {"status": "fresh", "records_written": written}
-            except AStockSourceError as exc:
-                repository.record_source_failure("chip_liquidity", source, str(exc))
-                optional_results[source] = {"status": "failed", "error": str(exc)}
-        try:
-            rows = stock_fund_flow_120d(symbol)
-            written = repository.save_money_flow(rows, fetched_at)
+        fetchers = (*record_fetchers, ("stock_fund_flow_120d", lambda: stock_fund_flow_120d(symbol)))
+        for source, result in _fetch_sources_concurrently(fetchers):
+            if result["status"] == "failed":
+                repository.record_source_failure("chip_liquidity", source, str(result["error"]))
+                optional_results[source] = {"status": "failed", "error": str(result["error"])}
+                continue
+            rows = result["value"]
+            if source == "stock_fund_flow_120d":
+                written = repository.save_money_flow(rows, fetched_at)
+            else:
+                written = repository.save_module_records(rows)
             if not rows:
-                repository.record_source_success("chip_liquidity", "stock_fund_flow_120d", 0)
+                repository.record_source_success("chip_liquidity", source, 0)
             records_written += written
-            optional_results["stock_fund_flow_120d"] = {"status": "fresh", "records_written": written}
-        except AStockSourceError as exc:
-            repository.record_source_failure("chip_liquidity", "stock_fund_flow_120d", str(exc))
-            optional_results["stock_fund_flow_120d"] = {"status": "failed", "error": str(exc)}
+            optional_results[source] = {"status": "fresh", "records_written": written}
         status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
         return {
             "module": module_id,
@@ -582,6 +602,25 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
         }
 
     return {"module": module_id, "symbol": symbol, "status": "not_configured", "records_written": 0}
+
+
+def _fetch_sources_concurrently(
+    fetchers: tuple[tuple[str, Callable[[], Any]], ...] | list[tuple[str, Callable[[], Any]]],
+    max_workers: int = 4,
+) -> list[tuple[str, dict[str, Any]]]:
+    if not fetchers:
+        return []
+    results: dict[str, dict[str, Any]] = {}
+    worker_count = max(1, min(max_workers, len(fetchers)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_by_source = {executor.submit(fetcher): source for source, fetcher in fetchers}
+        for future in as_completed(future_by_source):
+            source = future_by_source[future]
+            try:
+                results[source] = {"status": "fresh", "value": future.result()}
+            except Exception as exc:
+                results[source] = {"status": "failed", "error": exc}
+    return [(source, results[source]) for source, _ in fetchers]
 
 
 def _default_source_for_module(module_id: str) -> str:

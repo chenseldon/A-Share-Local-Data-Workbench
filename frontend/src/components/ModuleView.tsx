@@ -323,8 +323,8 @@ export function ModuleView({
           indicatorError={chart?.indicator_error ?? null}
           loading={chartLoading}
           error={chartError}
-          onRefresh={onRefreshMarket}
-          refreshing={marketRefreshing}
+          onRefresh={onRefreshModule}
+          refreshing={moduleRefreshing}
           searchQuery={searchQuery}
           searchResults={searchResults}
           isSearching={isSearching}
@@ -535,8 +535,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={fundamentalsPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleFundamentalsTables.map((table) => (
@@ -553,6 +551,8 @@ export function ModuleView({
             {fundamentalsSections.length === 0 && visibleFundamentalsTables.length === 0 && (
               <EmptyState title="No fundamentals payload" detail="The fundamentals connector returned no structured sections or table rows for this symbol." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={fundamentalsPayload?.source_status ?? []} />
           </>
         )}
       </div>
@@ -639,8 +639,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={optionsPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleOptionTables.map((table) => (
@@ -657,6 +655,8 @@ export function ModuleView({
             {optionSections.length === 0 && visibleOptionTables.length === 0 && (
               <EmptyState title="No ETF options payload" detail="Refresh the module to collect Sina ETF option chains, T-quotes, Greeks and implied volatility." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={optionsPayload?.source_status ?? []} />
           </>
         )}
       </div>
@@ -729,8 +729,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={announcementsPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleAnnouncementTables.map((table) => (
@@ -747,6 +745,8 @@ export function ModuleView({
             {announcementSections.length === 0 && visibleAnnouncementTables.length === 0 && (
               <EmptyState title="No announcements payload" detail="The announcements connector returned no structured sections or table rows for this symbol." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={announcementsPayload?.source_status ?? []} />
           </>
         )}
       </div>
@@ -819,8 +819,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={newsPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleNewsTables.map((table) => (
@@ -837,6 +835,8 @@ export function ModuleView({
             {newsSections.length === 0 && visibleNewsTables.length === 0 && (
               <EmptyState title="No news payload" detail="The news connectors returned no structured sections or table rows for this symbol." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={newsPayload?.source_status ?? []} />
           </>
         )}
       </div>
@@ -909,8 +909,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={reportsPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleTables.map((table) => (
@@ -927,6 +925,8 @@ export function ModuleView({
             {reportSections.length === 0 && visibleTables.length === 0 && (
               <EmptyState title="No research report payload" detail="The reports connector returned no structured sections or table rows for this symbol." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={reportsPayload?.source_status ?? []} />
           </>
         )}
       </div>
@@ -999,8 +999,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={signalsPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleSignalTables.map((table) => (
@@ -1017,6 +1015,8 @@ export function ModuleView({
             {signalSections.length === 0 && visibleSignalTables.length === 0 && (
               <EmptyState title="No signals payload" detail="The signals connector returned no structured sections or table rows for this symbol." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={signalsPayload?.source_status ?? []} />
           </>
         )}
       </div>
@@ -1089,8 +1089,6 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            <SourceCapabilitiesPanel section={sourceCapabilities} />
-            <SourceStatusPanel sources={chipPayload?.source_status ?? []} />
             {contentSections.map(renderReportSection)}
 
             {visibleChipTables.map((table) => (
@@ -1107,6 +1105,8 @@ export function ModuleView({
             {chipSections.length === 0 && visibleChipTables.length === 0 && (
               <EmptyState title="No chip/liquidity payload" detail="The chip and liquidity connector returned no structured sections or table rows for this symbol." />
             )}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={chipPayload?.source_status ?? []} />
           </>
         )}
       </div>

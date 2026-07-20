@@ -88,11 +88,12 @@ def test_eastmoney_global_news_parses_fast_news_list() -> None:
                 "data": {
                     "fastNewsList": [
                         {
-                            "code": "global-1",
+                            "code": "202607203812653432",
                             "title": "Global title",
                             "summary": "Global summary",
                             "showTime": "2026-07-15 08:00:00",
                             "mediaName": "Eastmoney",
+                            "url": "https://kuaixun.eastmoney.com/detail.html?id=202607203812653432",
                         }
                     ]
                 }
@@ -107,4 +108,4 @@ def test_eastmoney_global_news_parses_fast_news_list() -> None:
     assert records[0].symbol is None
     assert records[0].record_date == "2026-07-15"
     assert records[0].payload["summary"] == "Global summary"
-    assert records[0].payload["url"] == "https://kuaixun.eastmoney.com/detail.html?id=global-1"
+    assert records[0].payload["url"] == "https://finance.eastmoney.com/a/202607203812653432.html"

@@ -302,7 +302,25 @@ export default function App() {
       }
       setUpdateProgress({ active: true, percent: 35, message: "Refreshing market and K-line data..." });
       await refreshSecurity(targetSymbol, false);
-      setUpdateProgress({ active: true, percent: 55, message: "Refreshing module data..." });
+      setUpdateProgress({ active: true, percent: 50, message: "Updating market view..." });
+      const boardsPromise = fetchSecurityBoards(targetSymbol)
+        .then((response) => {
+          setBoards(response);
+          setBoardError(null);
+        })
+        .catch((error: unknown) => {
+          setBoards(null);
+          setBoardError(errorMessage(error));
+        });
+      const [initialOverviewResponse, chartResponse] = await Promise.all([
+        fetchSecurityOverview(targetSymbol),
+        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod)
+      ]);
+      setOverview(initialOverviewResponse);
+      setChart(chartResponse);
+      setOverviewLoading(false);
+      setChartLoading(false);
+      setUpdateProgress({ active: true, percent: 62, message: "Refreshing module data..." });
       const refreshModules = shouldRefreshEtfOptions(activeModule, targetSymbol)
         ? [...backgroundRefreshModules, "etf_options"]
         : backgroundRefreshModules;
@@ -312,14 +330,12 @@ export default function App() {
           failures.push(refreshModules[index]);
         }
       });
-      setUpdateProgress({ active: true, percent: 85, message: "Updating view..." });
-      const [overviewResponse, chartResponse, prefetchResults] = await Promise.all([
+      setUpdateProgress({ active: true, percent: 85, message: "Updating module snapshots..." });
+      const [overviewResponse, prefetchResults] = await Promise.all([
         fetchSecurityOverview(targetSymbol),
-        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod),
         Promise.allSettled(modulePrefetchModules.map((moduleId) => fetchModuleData(moduleId, targetSymbol)))
       ]);
       setOverview(overviewResponse);
-      setChart(chartResponse);
       const prefetched: Record<string, ModuleDataResponse> = {};
       prefetchResults.forEach((result, index) => {
         const moduleId = modulePrefetchModules[index];
@@ -337,15 +353,7 @@ export default function App() {
           setModuleError(null);
         }
       }
-      await fetchSecurityBoards(targetSymbol)
-        .then((response) => {
-          setBoards(response);
-          setBoardError(null);
-        })
-        .catch((error: unknown) => {
-          setBoards(null);
-          setBoardError(errorMessage(error));
-        });
+      await boardsPromise;
       await fetchSourceHealth()
         .then((response) => setSources(response.rows))
         .catch(() => setSources([]));
@@ -388,6 +396,9 @@ export default function App() {
     refreshModule(activeModule, selectedSymbol)
       .then(() => {
         loadModule();
+        if (activeModule === "market") {
+          loadSecurity();
+        }
         fetchSourceHealth()
           .then((response) => setSources(response.rows))
           .catch(() => setSources([]));
@@ -421,7 +432,6 @@ export default function App() {
             isSearching={isSearching}
             onQueryChange={setQuery}
             onSelectSymbol={handleSelectSymbol}
-            onRefresh={refreshCurrentView}
           />
         )}
         <div className="workspace-body">

@@ -1261,6 +1261,29 @@ p {
   margin-top: 6px;
 }
 
+.security-module-snapshot-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.security-snapshot-tables {
+  display: grid;
+  gap: 14px;
+}
+
+.security-snapshot-table {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.security-snapshot-table h3 {
+  margin: 0;
+  color: #d8e0e8;
+  font-size: 14px;
+  font-weight: 900;
+}
+
 .workspace-chart-only .module-market-strip .market-placeholders span,
 .workspace-chart-only .module-market-strip .market-placeholders button,
 .workspace-chart-only .tag-list span {

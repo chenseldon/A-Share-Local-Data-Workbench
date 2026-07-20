@@ -523,8 +523,20 @@ class DataRepository:
             "announcements": self.list_announcements(normalized_symbol, limit=8),
             "reports": self.list_reports(normalized_symbol, limit=8),
             "money_flow": self.list_money_flow(normalized_symbol, limit=8),
+            "module_snapshots": self.security_module_snapshots(normalized_symbol),
             "freshness": self.security_freshness(normalized_symbol),
         }
+
+    def security_module_snapshots(self, symbol: str) -> list[dict[str, Any]]:
+        normalized_symbol = symbol.upper()
+        return [
+            self._fundamentals_snapshot(normalized_symbol),
+            self._announcements_snapshot(normalized_symbol),
+            self._news_snapshot(normalized_symbol),
+            self._reports_snapshot(normalized_symbol),
+            self._chip_liquidity_snapshot(normalized_symbol),
+            self._signals_snapshot(normalized_symbol),
+        ]
 
     def latest_market_quote(self, symbol: str) -> dict[str, Any] | None:
         return self._fetch_one(
@@ -1944,6 +1956,217 @@ class DataRepository:
             (limit,),
         )
 
+    def _fundamentals_snapshot(self, symbol: str) -> dict[str, Any]:
+        rows = [
+            {**row, "statement_type": _statement_type_label(row.get("statement_type"))}
+            for row in self._list_module_records_for_source("fundamentals", "sina_financial_report", symbol, 24)
+        ]
+        return {
+            "module": "fundamentals",
+            "title": "Fundamentals Snapshot",
+            "tables": [
+                {
+                    "id": "financial_statements",
+                    "title": "Financial Statements",
+                    "rows": rows,
+                    "columns": [
+                        {"key": "statement_type", "label": "Statement"},
+                        {"key": "report_period", "label": "Report period"},
+                        {"key": "revenue", "label": "Revenue"},
+                        {"key": "net_profit", "label": "Net profit"},
+                        {"key": "eps", "label": "EPS"},
+                        {"key": "total_assets", "label": "Total assets"},
+                        {"key": "total_liabilities", "label": "Total liabilities"},
+                        {"key": "shareholder_equity", "label": "Equity"},
+                        {"key": "operating_cash_flow", "label": "Operating cash flow"},
+                        {"key": "cash_change", "label": "Cash change"},
+                        {"key": "source", "label": "Source"},
+                        {"key": "fetched_at", "label": "Fetched at"},
+                    ],
+                }
+            ],
+        }
+
+    def _announcements_snapshot(self, symbol: str) -> dict[str, Any]:
+        return {
+            "module": "announcements",
+            "title": "Announcements Snapshot",
+            "tables": [
+                {
+                    "id": "announcements",
+                    "title": "CNINFO Announcements",
+                    "rows": self.list_announcements(symbol, limit=8),
+                    "columns": [
+                        {"key": "title", "label": "Title"},
+                        {"key": "published_at", "label": "Published at"},
+                        {"key": "source", "label": "Source"},
+                        {"key": "fetched_at", "label": "Fetched at"},
+                    ],
+                }
+            ],
+        }
+
+    def _news_snapshot(self, symbol: str) -> dict[str, Any]:
+        cls_rows = self._list_news_source_records(symbol, "cls_telegraph", 10)
+        global_rows = self._list_news_source_records(symbol, "eastmoney_global_news", 10)
+        rows = sorted(cls_rows + global_rows, key=lambda row: str(row.get("time") or row.get("record_date") or ""), reverse=True)
+        return {
+            "module": "news",
+            "title": "News Snapshot",
+            "tables": [
+                {
+                    "id": "news_context",
+                    "title": "CLS + Eastmoney Global News",
+                    "rows": rows,
+                    "columns": [
+                        {"key": "title", "label": "Title"},
+                        {"key": "time", "label": "Time"},
+                        {"key": "media", "label": "Media"},
+                        {"key": "summary", "label": "Summary"},
+                        {"key": "source", "label": "Source"},
+                        {"key": "fetched_at", "label": "Fetched at"},
+                    ],
+                }
+            ],
+        }
+
+    def _reports_snapshot(self, symbol: str) -> dict[str, Any]:
+        return {
+            "module": "reports",
+            "title": "Research Reports Snapshot",
+            "tables": [
+                {
+                    "id": "research_reports",
+                    "title": "Company Reports",
+                    "rows": self.list_reports(symbol, limit=8),
+                    "columns": [
+                        {"key": "title", "label": "Title"},
+                        {"key": "report_date", "label": "Report date"},
+                        {"key": "institution", "label": "Institution"},
+                        {"key": "analyst", "label": "Analyst"},
+                        {"key": "rating", "label": "Rating"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                }
+            ],
+        }
+
+    def _chip_liquidity_snapshot(self, symbol: str) -> dict[str, Any]:
+        return {
+            "module": "chip_liquidity",
+            "title": "Chip And Liquidity Snapshot",
+            "tables": [
+                {
+                    "id": "margin_financing",
+                    "title": "Margin Financing Detail",
+                    "rows": self._list_module_records_for_source("chip_liquidity", "margin_trading", symbol, 5),
+                    "columns": [
+                        {"key": "date", "label": "Date"},
+                        {"key": "margin_balance", "label": "Margin balance"},
+                        {"key": "margin_buy", "label": "Margin buy"},
+                        {"key": "margin_repay", "label": "Margin repay"},
+                        {"key": "short_balance", "label": "Short balance"},
+                        {"key": "margin_short_balance", "label": "Total balance"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
+                {
+                    "id": "block_trades",
+                    "title": "Block Trades",
+                    "rows": self._list_module_records_for_source("chip_liquidity", "block_trade", symbol, 5),
+                    "columns": [
+                        {"key": "date", "label": "Date"},
+                        {"key": "price", "label": "Price"},
+                        {"key": "close", "label": "Close"},
+                        {"key": "premium_pct", "label": "Premium %"},
+                        {"key": "volume", "label": "Volume"},
+                        {"key": "amount", "label": "Amount"},
+                        {"key": "buyer", "label": "Buyer"},
+                        {"key": "seller", "label": "Seller"},
+                    ],
+                },
+                {
+                    "id": "holder_count",
+                    "title": "Holder Count Changes",
+                    "rows": self._list_module_records_for_source("chip_liquidity", "holder_num_change", symbol, 5),
+                    "columns": [
+                        {"key": "date", "label": "Date"},
+                        {"key": "holder_num", "label": "Holder count"},
+                        {"key": "change_num", "label": "Change count"},
+                        {"key": "change_ratio", "label": "Change %"},
+                        {"key": "avg_shares", "label": "Avg shares"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
+                {
+                    "id": "dividends",
+                    "title": "Dividend / Bonus History",
+                    "rows": self._list_module_records_for_source("chip_liquidity", "dividend_history", symbol, 5),
+                    "columns": [
+                        {"key": "date", "label": "Date"},
+                        {"key": "bonus_rmb", "label": "Cash dividend"},
+                        {"key": "transfer_ratio", "label": "Transfer ratio"},
+                        {"key": "bonus_ratio", "label": "Bonus ratio"},
+                        {"key": "plan", "label": "Plan status"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
+                {
+                    "id": "fund_flow_120d",
+                    "title": "120-Day Fund Flow",
+                    "rows": self.list_money_flow(symbol, limit=5),
+                    "columns": [
+                        {"key": "trade_date", "label": "Trade date"},
+                        {"key": "main_net_inflow", "label": "Main net inflow"},
+                        {"key": "retail_net_inflow", "label": "Retail net inflow"},
+                        {"key": "turnover_rate", "label": "Turnover rate"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
+            ],
+        }
+
+    def _signals_snapshot(self, symbol: str) -> dict[str, Any]:
+        industry_rows = sorted(
+            self._list_module_records_for_source("signals", "eastmoney_industry_comparison", symbol, 500),
+            key=lambda row: _numeric_sort_value(row.get("rank")),
+        )
+        return {
+            "module": "signals",
+            "title": "Signals Snapshot",
+            "tables": [
+                {
+                    "id": "minute_fund_flow",
+                    "title": "Intraday Minute Fund Flow",
+                    "rows": self._list_module_records_for_source("signals", "eastmoney_fund_flow_minute", symbol, 10),
+                    "columns": [
+                        {"key": "time", "label": "Time"},
+                        {"key": "main_net", "label": "Main net"},
+                        {"key": "super_net", "label": "Super net"},
+                        {"key": "large_net", "label": "Large net"},
+                        {"key": "mid_net", "label": "Mid net"},
+                        {"key": "small_net", "label": "Small net"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
+                {
+                    "id": "industry_comparison",
+                    "title": "Industry Comparison",
+                    "rows": industry_rows,
+                    "columns": [
+                        {"key": "rank", "label": "Rank"},
+                        {"key": "name", "label": "Industry"},
+                        {"key": "change_pct", "label": "Change %"},
+                        {"key": "up_count", "label": "Up"},
+                        {"key": "down_count", "label": "Down"},
+                        {"key": "leader", "label": "Leader"},
+                        {"key": "leader_change", "label": "Leader change"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
+            ],
+        }
+
     def list_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
         return self._fetch_all(
             """
@@ -2025,6 +2248,31 @@ class DataRepository:
             )
         return [_flatten_module_record(row) for row in rows]
 
+    def _list_module_records_for_source(self, module_id: str, source: str, symbol: str | None, limit: int) -> list[dict[str, Any]]:
+        if symbol:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = ? AND source = ? AND upper(coalesce(symbol, '')) = ?
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (module_id, source, symbol.upper(), limit),
+            )
+        else:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = ? AND source = ?
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (module_id, source, limit),
+            )
+        return [_flatten_module_record(row) for row in rows]
+
     def _list_news_records(self, symbol: str | None, limit: int) -> list[dict[str, Any]]:
         if symbol:
             rows = self._fetch_all(
@@ -2048,6 +2296,33 @@ class DataRepository:
                 LIMIT ?
                 """,
                 (limit,),
+            )
+        return [_flatten_module_record(row) for row in rows]
+
+    def _list_news_source_records(self, symbol: str | None, source: str, limit: int) -> list[dict[str, Any]]:
+        if symbol:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = 'news'
+                  AND source = ?
+                  AND (upper(coalesce(symbol, '')) = ? OR coalesce(symbol, '') = '')
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (source, symbol.upper(), limit),
+            )
+        else:
+            rows = self._fetch_all(
+                """
+                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
+                FROM module_records
+                WHERE module = 'news' AND source = ?
+                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
+                LIMIT ?
+                """,
+                (source, limit),
             )
         return [_flatten_module_record(row) for row in rows]
 
@@ -2113,6 +2388,21 @@ def _first_present(*values: Any) -> Any:
 def _join_non_empty(*values: Any) -> str | None:
     parts = [str(value).strip() for value in values if value is not None and str(value).strip()]
     return " / ".join(parts) if parts else None
+
+
+def _statement_type_label(value: Any) -> str:
+    return {
+        "lrb": "Income Statement",
+        "fzb": "Balance Sheet",
+        "llb": "Cash Flow",
+    }.get(str(value or ""), str(value or "NA"))
+
+
+def _numeric_sort_value(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def _latest_fetched_at(rows: list[dict[str, Any]]) -> Any:

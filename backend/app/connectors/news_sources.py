@@ -166,13 +166,14 @@ def eastmoney_global_news(page_size: int = 50, client: httpx.Client | None = Non
             continue
         news_time = item.get("showTime") or item.get("showtime") or fetched_at.isoformat()
         article_id = item.get("code") or item.get("id")
+        url = _eastmoney_finance_url(article_id, item.get("url") or item.get("artUrl"))
         row = {
             "symbol": None,
             "title": _clean_text(item.get("title")),
             "summary": _clean_text(item.get("summary") or item.get("digest"))[:300],
             "time": news_time,
             "media": item.get("mediaName") or "Eastmoney",
-            "url": item.get("url") or item.get("artUrl") or (f"https://kuaixun.eastmoney.com/detail.html?id={article_id}" if article_id else None),
+            "url": url,
             "source": "eastmoney_global_news",
         }
         records.append(
@@ -202,6 +203,15 @@ def _parse_jsonp(text: str) -> dict[str, Any]:
 
 def _clean_text(value: Any) -> str:
     return re.sub(r"<[^>]+>", "", str(value or "")).strip()
+
+
+def _eastmoney_finance_url(article_id: Any, upstream_url: Any) -> str | None:
+    url = str(upstream_url or "").strip()
+    match = re.search(r"kuaixun\.eastmoney\.com/detail\.html\?id=([0-9A-Za-z_-]+)", url)
+    resolved_id = str(article_id or "").strip() or (match.group(1) if match else "")
+    if re.fullmatch(r"\d{8,}", resolved_id):
+        return f"https://finance.eastmoney.com/a/{resolved_id}.html"
+    return url or None
 
 
 def _to_record_date(value: Any, fallback: datetime) -> str:

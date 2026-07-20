@@ -1,4 +1,4 @@
-import { RefreshCw, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import type { Security } from "../types";
 
 interface TopBarProps {
@@ -7,7 +7,6 @@ interface TopBarProps {
   isSearching: boolean;
   onQueryChange: (value: string) => void;
   onSelectSymbol: (symbol: string) => void;
-  onRefresh: () => void;
 }
 
 export function TopBar({
@@ -15,8 +14,7 @@ export function TopBar({
   searchResults,
   isSearching,
   onQueryChange,
-  onSelectSymbol,
-  onRefresh
+  onSelectSymbol
 }: TopBarProps) {
   return (
     <header className="topbar">
@@ -44,9 +42,6 @@ export function TopBar({
           </div>
         )}
       </div>
-      <button className="icon-button" onClick={onRefresh} aria-label="Refresh current view">
-        <RefreshCw aria-hidden="true" size={17} />
-      </button>
     </header>
   );
 }

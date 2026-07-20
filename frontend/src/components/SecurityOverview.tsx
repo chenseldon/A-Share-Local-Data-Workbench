@@ -87,6 +87,26 @@ function renderLinkedTitle(value: unknown, column: { key: string }, row: DataRow
   );
 }
 
+function renderModuleSnapshot(snapshot: NonNullable<SecurityOverviewType["module_snapshots"]>[number]) {
+  return (
+    <section key={snapshot.module} className="panel security-module-snapshot-panel">
+      <div className="section-heading">
+        <div>
+          <h2>{snapshot.title}</h2>
+        </div>
+      </div>
+      <div className="security-snapshot-tables">
+        {snapshot.tables.map((table) => (
+          <div key={table.id} className="security-snapshot-table">
+            <h3>{table.title}</h3>
+            <DataTable rows={table.rows} columns={table.columns} renderCell={renderLinkedTitle} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function SecurityOverview({
   overview,
   loading,
@@ -194,6 +214,7 @@ export function SecurityOverview({
         { label: "流通市值", value: formatSnapshotYi(overview.quote.float_market_cap) }
       ]
     : [];
+  const moduleSnapshots = overview.module_snapshots ?? [];
 
   return (
     <div className="content-grid security-workspace-grid">
@@ -239,49 +260,7 @@ export function SecurityOverview({
         </section>
       )}
 
-      {overview.announcements.length > 0 && (
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <h2>Announcements</h2>
-            </div>
-          </div>
-          <DataTable
-            rows={overview.announcements}
-            columns={[
-              { key: "symbol", label: "SYMBOL" },
-              { key: "title", label: "TITLE" },
-              { key: "published_at", label: "PUBLISHED AT" },
-              { key: "source", label: "SOURCE" },
-              { key: "fetched_at", label: "FETCHED AT" }
-            ]}
-            renderCell={renderLinkedTitle}
-          />
-        </section>
-      )}
-
-      {overview.reports.length > 0 && (
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <h2>Research Reports</h2>
-            </div>
-          </div>
-          <DataTable
-            rows={overview.reports}
-            columns={[
-              { key: "symbol", label: "SYMBOL" },
-              { key: "title", label: "TITLE" },
-              { key: "institution", label: "INSTITUTION" },
-              { key: "analyst", label: "ANALYST" },
-              { key: "rating", label: "RATING" },
-              { key: "report_date", label: "REPORT DATE" },
-              { key: "source", label: "SOURCE" }
-            ]}
-            renderCell={renderLinkedTitle}
-          />
-        </section>
-      )}
+      {moduleSnapshots.map(renderModuleSnapshot)}
     </div>
   );
 }
