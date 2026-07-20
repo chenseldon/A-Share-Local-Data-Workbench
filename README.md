@@ -1,67 +1,126 @@
 # A-Share Local Data Workbench
 
-Local A-share financial data workbench for research, cache-backed inspection, and connector development.
+本项目是一个本地化 A 股研究数据工作台，用于读取本机 `free-stockdb` 数据、缓存公开研究数据、查看 K 线与多模块快照，并通过 AI 辅助生成结构化研究报告。
 
-This is not a trading system. It does not place orders, read broker accounts, or provide unconditional trading instructions.
+This project is a local A-share research workbench for cache-backed market inspection, module-level data review, and AI-assisted research reports. It is not a trading system and does not place orders, read broker accounts, or provide unconditional trading instructions.
 
-## Stack
-- Frontend: React + Vite + TypeScript
-- Backend: FastAPI
-- Database: DuckDB
+## Screenshots / 界面截图
 
-## Quick Start
+### Security View
 
-One-click local start on Windows:
+![Security View](docs/screenshots/Security%20View.png)
+
+### AI Analysis Sidebar
+
+![AI Analysis Sidebar](docs/screenshots/AI_Analysis.png)
+
+## Features / 核心功能
+
+- **Security View**: local K-line chart, indicators, quote snapshot, market snapshot, and module snapshots.
+- **Eight research modules**: Market, Fundamentals, Announcements, News, Research Reports, Chip/Liquidity, Signals, and ETF Options.
+- **Cache-first workflow**: reads DuckDB cache first, then refreshes external/local sources in the background.
+- **Source visibility**: module pages show explicit source status, freshness, failures, and optional dependency states.
+- **AI Analyst**: right sidebar workflow for current page, full security, single module, or all-module analysis.
+- **Dark financial UI**: dense, local-only research interface designed for repeated inspection.
+
+## Architecture / 架构
+
+- **Frontend**: React + Vite + TypeScript
+- **Backend**: FastAPI
+- **Database**: DuckDB
+- **Local market data dependency**: `hello245m/free-stockdb`
+- **Connector reference**: selected read-only source ideas from `simonlin1212/a-stock-data`
+
+The application is designed as a local research tool. External public endpoints can throttle, drift, or fail, so every displayed source should be treated as research infrastructure rather than guaranteed real-time data.
+
+## Requirements / 环境要求
+
+- Windows local development environment
+- Python 3.11+
+- Node.js and npm
+- `uv` for Python dependency management
+- Local `free-stockdb` installation with downloaded market data
+- `stockdb.exe` running on `127.0.0.1:7899`
+- `stock_sdk.py` and `zhibiao.py` available through `ASHARE_FREE_STOCKDB_SDK_PATH`
+
+## Quick Start / 快速启动
+
+Install backend dependencies:
+
+```powershell
+cd backend
+uv sync
+cd ..
+```
+
+Install frontend dependencies:
+
+```powershell
+cd frontend
+npm install
+cd ..
+```
+
+Set the local free-stockdb SDK path. Replace the path with your own `pybao` directory:
+
+```powershell
+$env:ASHARE_FREE_STOCKDB_SDK_PATH = "D:\Edge\free-stockdb-main\pybao"
+```
+
+Start the workbench:
 
 ```powershell
 .\start_workbench.cmd
 ```
 
-This starts the FastAPI backend and Vite frontend in separate terminal windows, does not seed fixture data by default, clears old `local_fixture` rows, and opens `http://127.0.0.1:5173`.
+The app opens at:
 
-To start with labeled fixture rows:
+```text
+http://127.0.0.1:5173
+```
+
+Check dependencies without starting servers:
+
+```powershell
+.\start_workbench.cmd -CheckOnly
+```
+
+Start with labeled demo rows:
 
 ```powershell
 .\start_workbench.cmd -DemoData
 ```
 
-Backend:
+Demo rows are labeled as fixtures and should not be treated as current market data.
 
-```bash
-cd backend
-uv sync
-cd ..
-uv run uvicorn app.main:app --app-dir backend --reload
+## free-stockdb Setup / 本地数据库与 SDK
+
+This repository does **not** include `free-stockdb`, the Python SDK files, `stockdb.exe`, or any local market database.
+
+其他用户从 GitHub 下载本项目后，不能只靠本仓库直接运行完整行情和指标功能。他们还需要自行完成：
+
+1. Install or clone [`hello245m/free-stockdb`](https://github.com/hello245m/free-stockdb).
+2. Download and maintain local A-share data through free-stockdb.
+3. Start `stockdb.exe` and confirm it serves `127.0.0.1:7899`.
+4. Set `ASHARE_FREE_STOCKDB_SDK_PATH` to the `pybao` folder that contains `stock_sdk.py` and `zhibiao.py`.
+5. Run this project's backend and frontend dependencies.
+
+The backend bootstrap checks `ASHARE_FREE_STOCKDB_SDK_PATH` first. If it is not set, the current Windows default is:
+
+```text
+D:\Edge\free-stockdb-main\pybao
 ```
 
-If `uv` is not installed but the Python dependencies already exist, run:
+This default is only a local convenience path. Other machines should configure their own path.
 
-```bash
-python -m uvicorn app.main:app --app-dir backend --reload
-```
+## AI Analyst / AI 分析
 
-Frontend:
+The right sidebar supports OpenAI, Anthropic Claude, and DeepSeek API-compatible analysis. API keys are entered in the UI for the current session and are sent only for the single backend request. Keys are not stored in DuckDB, logs, source health, jobs, `MEMORY.md`, or browser local storage.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+AI analysis can use structured page/module/security data first and a workspace screenshot only when the selected model supports image input. Reports follow `AIReport.md` and are intended for research support, not trade execution.
 
-The frontend expects the backend at `http://127.0.0.1:8000` by default. Set `VITE_API_BASE_URL` to override it.
+## API Overview / API 概览
 
-## Optional Demo Data
-
-The backend does not seed demo rows by default. To start with labeled fixture data:
-
-```bash
-$env:ASHARE_DEMO_DATA="1"
-python -m uvicorn app.main:app --app-dir backend --reload
-```
-
-Fixture rows are marked with `source = local_fixture` and are not current market data.
-
-## API
 - `GET /api/health`
 - `GET /api/modules`
 - `GET /api/connectors/capabilities`
@@ -72,24 +131,31 @@ Fixture rows are marked with `source = local_fixture` and are not current market
 - `GET /api/security/{symbol}/chart`
 - `GET /api/modules/{module}/data`
 - `POST /api/modules/{module}/refresh`
+- `POST /api/ai/check`
+- `POST /api/ai/analyze`
 - `GET /api/jobs`
 - `GET /api/data-sources/status`
 
-## a-stock-data Alignment
+## Data Safety / 数据安全
 
-The local `a-stock-data-main` folder is a reference copy of `simonlin1212/a-stock-data`. It is not imported as an application package. Selected read-only functions are ported into backend connectors and tracked through `GET /api/connectors/capabilities`.
-
-## Local free-stockdb
-
-Daily K-line data is read from local `free-stockdb` when `stockdb.exe` is running on `127.0.0.1:7899` and `stock_sdk` is available to the backend Python environment. Set `ASHARE_FREE_STOCKDB_SDK_PATH` to the `pybao` directory containing `stock_sdk.py` and `zhibiao.py`; the Windows default is `D:\Edge\free-stockdb-main\pybao`. The workbench stores those rows in DuckDB as `source = free_stockdb_kline` and `adjustment = qfq`. Tencent remains a latest quote and valuation source; K-line chart rows do not fall back to Tencent/Baidu example data.
-
-The chart indicator library uses the local `zhibiao.zb.get()` SDK on demand. MA is enabled by default; MACD, KDJ, RSI and BOLL are only requested after the user enables them in the chart menu. `NaN` and infinite SDK values are returned as JSON `null`.
-
-Board and concept mapping uses `zhibiao.bk.get()`. Concepts and Shenwan level 1/2/3 industry mappings are shown in the chart header, and Shenwan level 1 is written back to `securities.sector` when available.
-
-Security search reads the local DuckDB securities directory built from free-stockdb. Run `POST /api/securities/universe/refresh` or use the app startup refresh to scan the supported A-share and ETF prefixes. The previous 7,034-symbol scan was incomplete; the refreshed prefix set targets the README-stated 7,400+ universe, and local validation found 7,860 candidates after adding ETF/fund prefixes. Typing a code or Chinese name returns up to five candidates. Market/module collection starts only after selecting a candidate or pressing refresh.
-
-## Data Safety
 - `trade_date` and `fetched_at` are separate fields.
 - Missing, stale, failed, and not collected states are explicit.
-- Public web sources may throttle, drift, or fail. Treat connectors as research infrastructure, not guaranteed real-time feeds.
+- Demo data is labeled as `local_fixture`.
+- Public web sources may throttle, drift, or fail.
+- This project must not store secrets, API keys, broker credentials, account information, or local database files in Git.
+- This project does not place, cancel, or route live orders.
+
+## Acknowledgements / 致谢
+
+本项目在以下开源项目基础上进行本地研究工作台搭建，并参考了其中的数据、SDK 或连接器设计思路：
+
+- [`hello245m/free-stockdb`](https://github.com/hello245m/free-stockdb)
+- [`simonlin1212/a-stock-data`](https://github.com/simonlin1212/a-stock-data)
+
+感谢上述项目作者的开源工作。如有冒犯、引用不当或许可证理解不当，请告知，我会第一时间调整或删除本项目。
+
+## 许可证与免责声明
+
+本仓库适用 [项目许可证](https://github.com/hello245m/free-stockdb/blob/main/LICENSE)。数据版权、使用授权和再分发条件由各数据源及其权利人决定；使用者应自行确认数据源条款。
+
+本项目用于软件学习、数据管理与量化研究，不构成投资建议。任何数据完整性、及时性和交易决策风险均应由使用者独立评估。
