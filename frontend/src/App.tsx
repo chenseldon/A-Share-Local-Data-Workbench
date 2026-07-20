@@ -11,6 +11,7 @@ import {
   fetchSecurityUniverseStatus,
   fetchSecurityOverview,
   fetchSourceHealth,
+  generateAiAnalysis,
   refreshModule,
   refreshSecurity,
   refreshSecurityUniverse,
@@ -23,6 +24,8 @@ import { SystemView } from "./components/SystemView";
 import { TopBar } from "./components/TopBar";
 import { fallbackModules } from "./data/fallbackModules";
 import type {
+  AiAnalysisResponse,
+  AiProvider,
   DataJob,
   BoardMappingResponse,
   ChartResponse,
@@ -40,6 +43,11 @@ const backgroundRefreshModules = ["fundamentals", "announcements", "news", "repo
 const modulePrefetchModules = ["market", "fundamentals", "announcements", "news", "reports", "chip_liquidity", "signals", "etf_options"];
 const etfOptionUnderlyings = new Set(["510050.SH", "510300.SH", "588000.SH", "510500.SH"]);
 const universeReadyCount = 7400;
+const aiDefaultModels: Record<AiProvider, string> = {
+  openai: "gpt-5",
+  anthropic: "claude-sonnet-5",
+  deepseek: "deepseek-v4-flash"
+};
 
 interface UpdateProgress {
   active: boolean;
@@ -50,6 +58,16 @@ interface UpdateProgress {
 interface ToastState {
   kind: "success" | "failed";
   message: string;
+}
+
+interface AiAnalystState {
+  open: boolean;
+  provider: AiProvider;
+  model: string;
+  apiKey: string;
+  loading: boolean;
+  error: string | null;
+  result: AiAnalysisResponse | null;
 }
 
 type SettledRequest<T> = { status: "fulfilled"; value: T } | { status: "rejected"; reason: unknown };
@@ -71,6 +89,16 @@ function moduleCacheKey(moduleId: string, symbol: string | null): string {
 
 function shouldRefreshEtfOptions(moduleId: string, symbol: string | null): boolean {
   return moduleId === "etf_options" || (symbol !== null && etfOptionUnderlyings.has(symbol.toUpperCase()));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function snapshotSignature(overview: SecurityOverviewType): string {
+  return (overview.module_snapshots ?? [])
+    .map((snapshot) => `${snapshot.module}:${snapshot.tables.map((table) => `${table.id}:${table.rows.length}`).join(",")}`)
+    .join("|");
 }
 
 export default function App() {
@@ -101,6 +129,7 @@ export default function App() {
   const moduleDataCacheRef = useRef<Record<string, ModuleDataResponse>>({});
   const cachePrimingSymbolRef = useRef<string | null>(null);
   const [pendingModuleAnchor, setPendingModuleAnchor] = useState<string | null>(null);
+  const aiPdfFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
@@ -110,12 +139,25 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [apiHealthError, setApiHealthError] = useState<string | null>(null);
+  const [aiAnalyst, setAiAnalyst] = useState<AiAnalystState>({
+    open: false,
+    provider: "openai",
+    model: aiDefaultModels.openai,
+    apiKey: "",
+    loading: false,
+    error: null,
+    result: null,
+  });
 
   const selectedModule = useMemo(
     () => modules.find((module) => module.id === activeModule),
     [activeModule, modules]
   );
   const chartIndicatorKey = useMemo(() => chartIndicators.join(","), [chartIndicators]);
+  const aiPdfDataUrl = useMemo(
+    () => aiAnalyst.result ? `data:application/pdf;base64,${aiAnalyst.result.pdf_base64}` : "",
+    [aiAnalyst.result]
+  );
 
   useEffect(() => {
     fetchHealth()
@@ -399,6 +441,52 @@ export default function App() {
     setPendingModuleAnchor(anchorId ?? `module-${moduleId}-top`);
   }
 
+  async function readBackSecurityContext(targetSymbol: string): Promise<string | null> {
+    const [overviewResult, chartResult, boardsResult, prefetchResult] = await Promise.all([
+      settleRequest(fetchSecurityOverview(targetSymbol)),
+      settleRequest(fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod)),
+      settleRequest(fetchSecurityBoards(targetSymbol)),
+      settleRequest(Promise.allSettled(modulePrefetchModules.map((moduleId) => fetchModuleData(moduleId, targetSymbol))))
+    ]);
+    if (overviewResult.status === "fulfilled") {
+      setOverview(overviewResult.value);
+      setOverviewError(null);
+    } else {
+      setOverviewError(errorMessage(overviewResult.reason));
+    }
+    if (chartResult.status === "fulfilled") {
+      setChart(chartResult.value);
+      setChartError(null);
+    } else {
+      setChartError(errorMessage(chartResult.reason));
+    }
+    if (boardsResult.status === "fulfilled") {
+      setBoards(boardsResult.value);
+      setBoardError(null);
+    } else {
+      setBoardError(errorMessage(boardsResult.reason));
+    }
+    const prefetched: Record<string, ModuleDataResponse> = {};
+    const prefetchResults = prefetchResult.status === "fulfilled" ? prefetchResult.value : [];
+    prefetchResults.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        const moduleId = modulePrefetchModules[index];
+        prefetched[moduleCacheKey(moduleId, targetSymbol)] = result.value;
+      } else if (modulePrefetchModules[index] === activeModule && activeView === "module") {
+        setModuleError(errorMessage(result.reason));
+      }
+    });
+    moduleDataCacheRef.current = { ...moduleDataCacheRef.current, ...prefetched };
+    if (activeView === "module") {
+      const activePrefetched = prefetched[moduleCacheKey(activeModule, targetSymbol)];
+      if (activePrefetched) {
+        setModuleData(activePrefetched);
+        setModuleError(null);
+      }
+    }
+    return overviewResult.status === "fulfilled" ? snapshotSignature(overviewResult.value) : null;
+  }
+
   async function runFullRefresh(targetSymbol = selectedSymbol) {
     if (!targetSymbol) {
       return;
@@ -430,32 +518,26 @@ export default function App() {
         }
       });
       setUpdateProgress({ active: true, percent: 78, message: "Updating cached snapshots..." });
-      const [overviewResult, chartResult, boardsResult, prefetchResults] = await Promise.all([
-        fetchSecurityOverview(targetSymbol),
-        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod),
-        fetchSecurityBoards(targetSymbol),
-        Promise.allSettled(modulePrefetchModules.map((moduleId) => fetchModuleData(moduleId, targetSymbol)))
-      ]);
-      setOverview(overviewResult);
-      setChart(chartResult);
-      setBoards(boardsResult);
-      setBoardError(null);
-      const prefetched: Record<string, ModuleDataResponse> = {};
-      prefetchResults.forEach((result, index) => {
-        const moduleId = modulePrefetchModules[index];
-        if (result.status === "fulfilled") {
-          prefetched[moduleCacheKey(moduleId, targetSymbol)] = result.value;
-        } else if (moduleId === activeModule && activeView === "module") {
-          setModuleError(errorMessage(result.reason));
+      let previousSignature = await readBackSecurityContext(targetSymbol);
+      let stabilized = false;
+      for (let attempt = 1; attempt <= 5; attempt += 1) {
+        setUpdateProgress({
+          active: true,
+          percent: Math.min(95, 78 + attempt * 3),
+          message: `Waiting for module snapshots (${attempt * 10}s)...`,
+        });
+        await sleep(10_000);
+        const nextSignature = await readBackSecurityContext(targetSymbol);
+        if (nextSignature && nextSignature === previousSignature) {
+          stabilized = true;
+          break;
         }
-      });
-      moduleDataCacheRef.current = { ...moduleDataCacheRef.current, ...prefetched };
-      if (activeView === "module") {
-        const activePrefetched = prefetched[moduleCacheKey(activeModule, targetSymbol)];
-        if (activePrefetched) {
-          setModuleData(activePrefetched);
-          setModuleError(null);
-        }
+        previousSignature = nextSignature;
+      }
+      if (!stabilized) {
+        setUpdateProgress({ active: true, percent: 97, message: "Final snapshot readback..." });
+        await sleep(10_000);
+        await readBackSecurityContext(targetSymbol);
       }
       await fetchSourceHealth()
         .then((response) => setSources(response.rows))
@@ -507,6 +589,64 @@ export default function App() {
       .finally(() => setModuleRefreshing(false));
   }
 
+  function openAiAnalyst() {
+    setAiAnalyst((current) => ({
+      ...current,
+      open: true,
+      error: null,
+      result: null,
+      model: current.model || aiDefaultModels[current.provider],
+    }));
+  }
+
+  function closeAiAnalyst() {
+    setAiAnalyst({
+      open: false,
+      provider: "openai",
+      model: aiDefaultModels.openai,
+      apiKey: "",
+      loading: false,
+      error: null,
+      result: null,
+    });
+  }
+
+  function updateAiProvider(provider: AiProvider) {
+    setAiAnalyst((current) => ({
+      ...current,
+      provider,
+      model: aiDefaultModels[provider],
+      error: null,
+    }));
+  }
+
+  function runAiAnalyst() {
+    if (!selectedSymbol || !aiAnalyst.apiKey.trim()) {
+      setAiAnalyst((current) => ({ ...current, error: "API key is required for this one-time request." }));
+      return;
+    }
+    setAiAnalyst((current) => ({ ...current, loading: true, error: null, result: null }));
+    generateAiAnalysis(selectedSymbol, {
+      provider: aiAnalyst.provider,
+      api_key: aiAnalyst.apiKey,
+      model: aiAnalyst.model,
+      period: chartPeriod,
+    })
+      .then((result) => setAiAnalyst((current) => ({ ...current, loading: false, result, error: null })))
+      .catch((error: unknown) => setAiAnalyst((current) => ({ ...current, loading: false, error: errorMessage(error) })));
+  }
+
+  function copyAiReport() {
+    if (!aiAnalyst.result) {
+      return;
+    }
+    void navigator.clipboard.writeText(aiAnalyst.result.report_text);
+  }
+
+  function printAiReport() {
+    aiPdfFrameRef.current?.contentWindow?.print();
+  }
+
   const darkModuleActive = activeView === "module";
   const darkWorkspaceActive = activeView === "security" || darkModuleActive;
 
@@ -551,6 +691,8 @@ export default function App() {
               chartPeriod={chartPeriod}
               onChartPeriodChange={handleChartPeriodChange}
               onRefreshMarket={refreshCurrentView}
+              onPrintSecurity={() => window.print()}
+              onOpenAiAnalyst={openAiAnalyst}
               marketRefreshing={marketRefreshing}
               searchQuery={query}
               searchResults={searchResults}
@@ -594,6 +736,72 @@ export default function App() {
             <SystemView sources={sources} jobs={jobs} capabilities={capabilities} loading={systemLoading} error={systemError} />
           )}
         </div>
+        {aiAnalyst.open && (
+          <div className="ai-modal-backdrop" role="dialog" aria-modal="true" aria-label="AI Analyst report">
+            <section className="ai-modal">
+              <div className="ai-modal-header">
+                <div>
+                  <span className="start-eyebrow">AI Analyst</span>
+                  <h2>{selectedSymbol ?? "No symbol selected"}</h2>
+                </div>
+                <button className="secondary-button" type="button" onClick={closeAiAnalyst}>
+                  Close
+                </button>
+              </div>
+              <form
+                className="ai-controls"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  runAiAnalyst();
+                }}
+              >
+                <label>
+                  <span>Provider</span>
+                  <select value={aiAnalyst.provider} onChange={(event) => updateAiProvider(event.target.value as AiProvider)}>
+                    <option value="openai">ChatGPT / OpenAI</option>
+                    <option value="anthropic">Claude</option>
+                    <option value="deepseek">DeepSeek</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Model</span>
+                  <input value={aiAnalyst.model} onChange={(event) => setAiAnalyst((current) => ({ ...current, model: event.target.value }))} />
+                </label>
+                <label>
+                  <span>API key</span>
+                  <input
+                    type="password"
+                    value={aiAnalyst.apiKey}
+                    autoComplete="off"
+                    onChange={(event) => setAiAnalyst((current) => ({ ...current, apiKey: event.target.value }))}
+                    placeholder="Used once, not saved"
+                  />
+                </label>
+                <button className="primary-button" type="submit" disabled={aiAnalyst.loading || !selectedSymbol}>
+                  {aiAnalyst.loading ? "Generating PDF" : "Generate"}
+                </button>
+              </form>
+              {aiAnalyst.error && <div className="ai-error">{aiAnalyst.error}</div>}
+              {aiAnalyst.result ? (
+                <>
+                  <div className="ai-report-actions">
+                    <button className="secondary-button" type="button" onClick={copyAiReport}>
+                      Copy
+                    </button>
+                    <button className="secondary-button" type="button" onClick={printAiReport}>
+                      Print
+                    </button>
+                  </div>
+                  <iframe ref={aiPdfFrameRef} className="ai-pdf-frame" title="AI Analyst PDF report" src={aiPdfDataUrl} />
+                </>
+              ) : (
+                <div className="ai-empty">
+                  Enter a provider API key to generate a one-time PDF research report from local Security View data.
+                </div>
+              )}
+            </section>
+          </div>
+        )}
         {updateProgress?.active && (
           <div className="update-progress" role="status" aria-live="polite">
             <div className="update-progress-card">

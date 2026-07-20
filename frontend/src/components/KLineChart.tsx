@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   ArrowUpRight,
+  Bot,
   Brush,
   ChevronUp,
   Crosshair,
@@ -16,6 +17,7 @@ import {
   Minus,
   MousePointer2,
   Plus,
+  Printer,
   RefreshCw,
   Ruler,
   Search,
@@ -56,6 +58,8 @@ interface KLineChartProps {
   loading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
+  onPrintSecurity?: () => void;
+  onOpenAiAnalyst?: () => void;
   refreshing?: boolean;
   searchQuery?: string;
   searchResults?: Security[];
@@ -301,6 +305,8 @@ export function KLineChart(props: KLineChartProps) {
     loading,
     error,
     onRefresh,
+    onPrintSecurity,
+    onOpenAiAnalyst,
     refreshing,
     searchQuery = "",
     searchResults = [],
@@ -1024,41 +1030,59 @@ export function KLineChart(props: KLineChartProps) {
           ))}
         </div>
         <div className="chart-actions">
-          <div className="indicator-menu-wrap">
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => setIndicatorMenuOpen((open) => !open)}
-              aria-expanded={indicatorMenuOpen}
-            >
-              <Settings2 aria-hidden="true" size={15} />
-              Indicators
-            </button>
-            {indicatorMenuOpen && (
-              <div className="indicator-menu">
-                <div className="indicator-menu-header">
-                  <strong>Indicators</strong>
-                  <small>{indicatorOptions.length - 1} free-stockdb SDK indicators</small>
+          <div className="chart-action-stack">
+            <div className="indicator-menu-wrap">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setIndicatorMenuOpen((open) => !open)}
+                aria-expanded={indicatorMenuOpen}
+              >
+                <Settings2 aria-hidden="true" size={15} />
+                Indicators
+              </button>
+              {indicatorMenuOpen && (
+                <div className="indicator-menu">
+                  <div className="indicator-menu-header">
+                    <strong>Indicators</strong>
+                    <small>{indicatorOptions.length - 1} free-stockdb SDK indicators</small>
+                  </div>
+                  {indicatorOptions.map((indicator) => (
+                    <label key={indicator.id}>
+                      <input
+                        type="checkbox"
+                        checked={indicatorEnabled(indicator.id)}
+                        onChange={() => toggleIndicator(indicator.id)}
+                      />
+                      <span>{indicator.label}</span>
+                      <small>{indicator.placement === "overlay" ? "Main" : indicator.placement === "pane" ? "Pane" : "Built-in"}</small>
+                    </label>
+                  ))}
                 </div>
-                {indicatorOptions.map((indicator) => (
-                  <label key={indicator.id}>
-                    <input
-                      type="checkbox"
-                      checked={indicatorEnabled(indicator.id)}
-                      onChange={() => toggleIndicator(indicator.id)}
-                    />
-                    <span>{indicator.label}</span>
-                    <small>{indicator.placement === "overlay" ? "Main" : indicator.placement === "pane" ? "Pane" : "Built-in"}</small>
-                  </label>
-                ))}
-              </div>
+              )}
+            </div>
+            {onPrintSecurity && (
+              <button className="secondary-button" type="button" onClick={onPrintSecurity}>
+                <Printer aria-hidden="true" size={15} />
+                PDF Print
+              </button>
             )}
           </div>
-          {onRefresh && (
-            <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
-              <RefreshCw aria-hidden="true" size={15} />
-              {refreshing ? "Refreshing" : "Refresh market"}
-            </button>
+          {(onRefresh || onOpenAiAnalyst) && (
+            <div className="chart-action-stack">
+              {onRefresh && (
+                <button className="secondary-button" onClick={onRefresh} disabled={refreshing}>
+                  <RefreshCw aria-hidden="true" size={15} />
+                  {refreshing ? "Refreshing" : "Refresh market"}
+                </button>
+              )}
+              {onOpenAiAnalyst && (
+                <button className="secondary-button" type="button" onClick={onOpenAiAnalyst}>
+                  <Bot aria-hidden="true" size={15} />
+                  AI Analyst
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

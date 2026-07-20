@@ -6,6 +6,7 @@ from pathlib import Path
 from duckdb import TransactionException
 from fastapi.testclient import TestClient
 
+from app import database
 from app.connectors import astock_sources
 from app.connectors.astock_sources import AStockSourceError, ModuleRecord
 from app.connectors.public_market import BoardMapping, MarketBar, MarketDataError, MarketQuote, MarketSnapshot, ResolvedSecurity, normalize_symbol
@@ -13,6 +14,78 @@ from app.database import initialize_database
 from app.demo_data import seed_demo_data
 from app.main import _merge_indicator_rows, create_app
 from app.repository import DataRepository
+
+
+def test_repository_fetch_all_retries_transaction_conflict(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class Cursor:
+        description = [("value",)]
+
+        def fetchall(self) -> list[tuple[str]]:
+            return [("ok",)]
+
+    class Connection:
+        def execute(self, _query: str, _params: tuple[object, ...]) -> Cursor:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise TransactionException("conflict")
+            return Cursor()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.repository.connect", lambda _db_path: Connection())
+
+    rows = DataRepository("dummy.duckdb")._fetch_all("SELECT 'ok'", ())
+
+    assert attempts["count"] == 2
+    assert rows == [{"value": "ok"}]
+
+
+def test_repository_fetch_all_retries_textual_duckdb_conflict(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class Cursor:
+        description = [("value",)]
+
+        def fetchall(self) -> list[tuple[str]]:
+            return [("ok",)]
+
+    class Connection:
+        def execute(self, _query: str, _params: tuple[object, ...]) -> Cursor:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("Transaction conflict: conflict on update")
+            return Cursor()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.repository.connect", lambda _db_path: Connection())
+
+    rows = DataRepository("dummy.duckdb")._fetch_all("SELECT 'ok'", ())
+
+    assert attempts["count"] == 2
+    assert rows == [{"value": "ok"}]
+
+
+def test_database_connect_retries_windows_file_handle_conflict(monkeypatch) -> None:
+    attempts = {"count": 0}
+    sentinel = object()
+
+    def fake_connect(_path: str) -> object:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("IO Error: Cannot open file: 另一个程序正在使用此文件")
+        return sentinel
+
+    monkeypatch.setattr(database.duckdb, "connect", fake_connect)
+
+    connection = database.connect(":memory:")
+
+    assert connection is sentinel
+    assert attempts["count"] == 2
 
 
 def test_empty_api_states(tmp_path: Path) -> None:
@@ -226,6 +299,26 @@ def test_security_overview_returns_ordered_module_snapshots(tmp_path: Path) -> N
                     raw_payload_hash="signal-hash-1",
                 ),
                 ModuleRecord(
+                    module="reports",
+                    source="eastmoney_industry_reports",
+                    data_key="industry-report-1",
+                    symbol="600519.SH",
+                    record_date="2026-07-15",
+                    payload={
+                        "title": "Industry item",
+                        "report_date": "2026-07-15",
+                        "industry": "Food & Beverage",
+                        "industry_code": "BK001",
+                        "institution": "Eastmoney Research",
+                        "analyst": "Industry Analyst",
+                        "rating": "Overweight",
+                        "url": "https://pdf.dfcfw.com/pdf/H3_INDUSTRY_1.pdf",
+                        "source": "eastmoney_industry_reports",
+                    },
+                    fetched_at=fetched_at,
+                    raw_payload_hash="report-hash-1",
+                ),
+                ModuleRecord(
                     module="signals",
                     source="eastmoney_industry_comparison",
                     data_key="industry-2",
@@ -302,6 +395,9 @@ def test_security_overview_returns_ordered_module_snapshots(tmp_path: Path) -> N
         assert snapshots[2]["tables"][0]["rows"][0]["title"] == "Stock item"
         assert snapshots[2]["tables"][1]["rows"][0]["title"] == "CLS item"
         assert snapshots[2]["tables"][2]["rows"][0]["title"] == "Global item"
+        assert [table["title"] for table in snapshots[3]["tables"]] == ["Company Reports", "Industry Reports"]
+        assert snapshots[3]["tables"][1]["target_anchor"] == "module-reports-table-industry_reports"
+        assert snapshots[3]["tables"][1]["rows"][0]["title"] == "Industry item"
         assert snapshots[4]["tables"][0]["rows"][0]["margin_balance"] == 1000.0
         assert [row["rank"] for row in snapshots[5]["tables"][1]["rows"]] == [1, 2]
 

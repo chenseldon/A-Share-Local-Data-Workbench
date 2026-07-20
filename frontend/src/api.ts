@@ -1,4 +1,6 @@
 import type {
+  AiAnalysisRequest,
+  AiAnalysisResponse,
   BoardMappingResponse,
   ChartResponse,
   ConnectorCapability,
@@ -43,6 +45,19 @@ async function apiPost<T>(path: string): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `Request failed: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const responseBody = await response.text();
+    throw new Error(responseBody || `Request failed: ${response.status}`);
   }
   return (await response.json()) as T;
 }
@@ -108,6 +123,10 @@ export function fetchSecurityChart(
 
 export function fetchSecurityBoards(symbol: string): Promise<BoardMappingResponse> {
   return apiGet<BoardMappingResponse>(`/api/security/${encodeURIComponent(symbol)}/boards`);
+}
+
+export function generateAiAnalysis(symbol: string, request: AiAnalysisRequest): Promise<AiAnalysisResponse> {
+  return apiPostJson<AiAnalysisResponse>(`/api/security/${encodeURIComponent(symbol)}/ai-analysis`, request);
 }
 
 export function fetchModuleData(moduleId: string, symbol: string | null): Promise<ModuleDataResponse> {

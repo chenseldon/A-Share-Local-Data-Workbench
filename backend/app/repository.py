@@ -17,6 +17,19 @@ from .connectors.public_market import MarketSnapshot, ResolvedSecurity
 from .modules import MODULE_BY_ID
 
 
+def _is_transient_duckdb_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return isinstance(exc, TransactionException) or any(
+        fragment in message
+        for fragment in (
+            "transaction conflict",
+            "conflict on update",
+            "cannot start a transaction",
+            "database is locked",
+        )
+    )
+
+
 class DataRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.db_path = db_path
@@ -25,13 +38,21 @@ class DataRepository:
         initialize_database(self.db_path)
 
     def _fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        connection = connect(self.db_path)
-        try:
-            cursor = connection.execute(query, params)
-            columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
-        finally:
-            connection.close()
+        for attempt in range(5):
+            connection = connect(self.db_path)
+            try:
+                cursor = connection.execute(query, params)
+                columns = [column[0] for column in cursor.description]
+                return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+            except Exception as exc:
+                if not _is_transient_duckdb_error(exc):
+                    raise
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+            finally:
+                connection.close()
+        return []
 
     def _fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         rows = self._fetch_all(query, params)
@@ -2083,6 +2104,7 @@ class DataRepository:
         }
 
     def _reports_snapshot(self, symbol: str) -> dict[str, Any]:
+        industry_rows = self._list_module_records_for_source("reports", "eastmoney_industry_reports", symbol, 8)
         return {
             "module": "reports",
             "title": "Research Reports Snapshot",
@@ -2102,7 +2124,23 @@ class DataRepository:
                         {"key": "rating", "label": "Rating"},
                         {"key": "source", "label": "Source"},
                     ],
-                }
+                },
+                {
+                    "id": "industry_reports",
+                    "title": "Industry Reports",
+                    "target_anchor": "module-reports-table-industry_reports",
+                    "rows": industry_rows,
+                    "columns": [
+                        {"key": "title", "label": "Title"},
+                        {"key": "report_date", "label": "Report date"},
+                        {"key": "industry", "label": "Industry"},
+                        {"key": "industry_code", "label": "Industry code"},
+                        {"key": "institution", "label": "Institution"},
+                        {"key": "analyst", "label": "Analyst"},
+                        {"key": "rating", "label": "Rating"},
+                        {"key": "source", "label": "Source"},
+                    ],
+                },
             ],
         }
 

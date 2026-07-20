@@ -378,3 +378,23 @@ export interface RefreshResponse {
   expected_source_count?: number;
   module_results?: Record<string, unknown>;
 }
+
+export type AiProvider = "openai" | "anthropic" | "deepseek";
+
+export interface AiAnalysisRequest {
+  provider: AiProvider;
+  api_key: string;
+  model?: string | null;
+  period: string;
+}
+
+export interface AiAnalysisResponse {
+  symbol: string;
+  name: string | null;
+  provider: AiProvider;
+  model: string;
+  generated_at: string;
+  report_text: string;
+  pdf_base64: string;
+  usage?: Record<string, unknown> | null;
+}

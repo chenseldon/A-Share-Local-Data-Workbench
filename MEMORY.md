@@ -67,6 +67,11 @@
 - Security View snapshot titles carry internal navigation metadata. Parent snapshot titles switch to the target module top; child table titles switch to the matching Module table/section anchor and briefly highlight the destination after asynchronous module data mounts.
 - Fundamentals Security Snapshot merges Sina income statement, balance sheet and cash flow rows by `report_period` into one wide financial statements table without a `Statement` column. The Fundamentals Module page still keeps the original statement-specific tables.
 - News Security Snapshot is split into Eastmoney Stock News, CLS Telegrams and Eastmoney Global News tables, each capped at 8 cached rows. External title URLs remain normal new-tab links; snapshot headings are reserved for in-app navigation.
+- Research Reports Security Snapshot includes both Company Reports and Industry Reports, each capped at 8 cached rows, with child headings linking to the corresponding Reports Module tables.
+- Security View background refresh now rereads cached overview/module data every 10 seconds after refresh, up to a 50-second stabilization window plus one final 10-second readback, while preserving the initial cache-first render.
+- Security View exposes PDF Print from the K-line header. Print CSS hides the sidebar, chart actions, drawing tools, toast/progress overlays and AI modal so only the Security View content from chart through Signals Snapshot is printed.
+- AI Analyst is a one-shot, non-persistent workflow. API keys live only in current React state and the single backend request, are never saved to DuckDB or memory, and the backend returns report text plus a ReportLab-generated PDF base64 for modal preview, copy and print.
+- DuckDB connection creation is serialized and retried for Windows file-handle conflicts such as `Cannot open file`, `Unique file handle conflict`, and `already attached`; repository read queries also retry clear transient transaction-conflict messages.
 
 ## Secrets
 - No secrets are stored in this project memory.
