@@ -19,9 +19,50 @@ AnalysisScope = Literal["current_page", "security_full", "module", "all_modules"
 InputMode = Literal["content", "content+screenshot"]
 
 DEFAULT_MODELS: dict[Provider, str] = {
-    "openai": "gpt-5",
+    "openai": "gpt-5.6",
     "anthropic": "claude-sonnet-5",
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-v4-pro",
+}
+
+INDICATOR_FIELD_HINTS: dict[str, tuple[str, ...]] = {
+    "ma": ("ma5", "ma10", "ma20"),
+    "ema": ("ema5", "ema10", "ema20", "ema"),
+    "sma": ("sma5", "sma10", "sma20", "sma"),
+    "wma": ("wma5", "wma10", "wma20", "wma"),
+    "dma": ("dma10", "dma"),
+    "std": ("std20", "std"),
+    "sum": ("sum20", "sum"),
+    "hhv": ("hhv20", "hhv"),
+    "llv": ("llv20", "llv"),
+    "ref": ("ref1", "ref"),
+    "macd": ("dif", "dea", "macd"),
+    "kdj": ("k", "d", "j"),
+    "rsi": ("rsi", "rsi6", "rsi12", "rsi24"),
+    "wr": ("wr", "wr1"),
+    "bias": ("bias1", "bias2", "bias3"),
+    "boll": ("upper", "mid", "lower"),
+    "psy": ("psy", "psyma"),
+    "cci": ("cci",),
+    "atr": ("atr",),
+    "bbi": ("bbi",),
+    "dmi": ("pdi", "mdi", "adx", "adxr"),
+    "taq": ("taq_up", "taq_mid", "taq_down"),
+    "ktn": ("ktn_up", "ktn_mid", "ktn_down"),
+    "trix": ("trix", "trma"),
+    "vr": ("vr",),
+    "cr": ("cr",),
+    "emv": ("emv", "maemv"),
+    "dpo": ("dpo", "madpo"),
+    "brar": ("ar", "br"),
+    "dfma": ("dfma_dif", "dfma_difma"),
+    "mtm": ("mtm", "mtmma"),
+    "mass": ("mass", "ma"),
+    "roc": ("roc", "maroc"),
+    "expma": ("exp1", "exp2"),
+    "obv": ("obv", "maobv"),
+    "mfi": ("mfi",),
+    "asi": ("asi", "asit"),
+    "xsii": ("td1", "td2", "td3", "td4"),
 }
 
 SYSTEM_PROMPT = """You are a public-equity research assistant for a local A-share research workbench.
@@ -62,6 +103,7 @@ def build_analysis_context(
             indicator_status,
             indicator_error,
         )
+        context["daily_indicator_context"] = build_daily_indicator_context(repository, symbol)
     if scope == "module" and module_id:
         context["module_data"] = repository.get_module_data(module_id, symbol, limit=100)
     if scope == "all_modules":
@@ -127,6 +169,81 @@ def chart_rows_with_all_indicators(repository: DataRepository, symbol: str, peri
     return rows, indicator_status, indicator_error
 
 
+def build_daily_indicator_context(repository: DataRepository, symbol: str) -> dict[str, Any]:
+    rows, status, error = chart_rows_with_all_indicators(repository, symbol, "1d")
+    return {
+        "period": "1d",
+        "row_count": len(rows),
+        "rows": rows[-500:],
+        "status": status,
+        "error": error,
+        "indicator_catalog": indicator_catalog(),
+        "indicator_coverage": indicator_coverage(rows, status, error),
+    }
+
+
+def indicator_catalog() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": indicator_id,
+            "name": str(config.get("name") or indicator_id),
+            "params": config.get("n"),
+            "fields": list(INDICATOR_FIELD_HINTS.get(indicator_id, (indicator_id,))),
+        }
+        for indicator_id, config in FREE_STOCKDB_INDICATOR_CONFIG.items()
+    ]
+
+
+def indicator_coverage(rows: list[dict[str, Any]], status: str, error: str | None) -> list[dict[str, Any]]:
+    coverage: list[dict[str, Any]] = []
+    for indicator_id, fields in INDICATOR_FIELD_HINTS.items():
+        available_fields = [
+            field for field in fields
+            if any(row.get(field) not in (None, "", "-") for row in rows)
+        ]
+        coverage.append(
+            {
+                "id": indicator_id,
+                "status": "failed" if status == "failed" else ("fresh" if available_fields else "no_data"),
+                "fields": list(fields),
+                "available_fields": available_fields,
+                "missing_fields": [field for field in fields if field not in available_fields],
+                "available_row_count": sum(
+                    1 for row in rows
+                    if any(row.get(field) not in (None, "", "-") for field in fields)
+                ),
+                "error": error if status == "failed" else None,
+            }
+        )
+    return coverage
+
+
+def check_ai_connection(
+    provider: Provider,
+    api_key: str,
+    model: str | None,
+    client: httpx.Client | None = None,
+) -> tuple[bool, dict[str, Any] | None, str, str]:
+    selected_model = model.strip() if model and model.strip() else DEFAULT_MODELS[provider]
+    prompt = "Reply with exactly: ok"
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=30)
+    try:
+        if provider == "openai":
+            text, usage = _call_openai(http_client, api_key, selected_model, prompt, None)
+        elif provider == "anthropic":
+            text, usage = _call_anthropic(http_client, api_key, selected_model, prompt, None)
+        elif provider == "deepseek":
+            text, usage = _call_deepseek(http_client, api_key, selected_model, prompt, None)
+        else:
+            raise ValueError(f"Unsupported AI provider: {provider}")
+    finally:
+        if owns_client:
+            http_client.close()
+    ok = bool(str(text or "").strip())
+    return ok, usage, selected_model, "AI provider responded." if ok else "AI provider returned an empty response."
+
+
 def generate_html_analysis(
     provider: Provider,
     api_key: str,
@@ -161,7 +278,7 @@ def generate_html_analysis(
 def model_supports_screenshot(provider: Provider, model: str) -> bool:
     normalized = model.lower()
     if provider == "openai":
-        return any(token in normalized for token in ("gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4", "vision"))
+        return any(token in normalized for token in ("gpt-4o", "gpt-4.1", "gpt-5", "gpt-5.5", "gpt-5.6", "o3", "o4", "vision"))
     if provider == "anthropic":
         return any(token in normalized for token in ("claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "sonnet", "opus", "haiku"))
     if provider == "deepseek":

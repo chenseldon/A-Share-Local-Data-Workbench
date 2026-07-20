@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from fastapi.testclient import TestClient
 
-from app.ai_analysis import generate_html_analysis, model_supports_screenshot
+from app.ai_analysis import build_analysis_context, generate_html_analysis, model_supports_screenshot
 from app.demo_data import seed_demo_data
 from app.main import create_app
 
@@ -45,7 +45,7 @@ def test_ai_analyze_endpoint_returns_html_without_persisting_api_key(tmp_path: P
             '<article class="ai-report-document"><h1>600519.SH Kweichow Moutai | 评分：50 | 倾向：中性</h1><p>仅测试。</p></article>',
             "600519.SH Kweichow Moutai | 评分：50 | 倾向：中性\n仅测试。",
             {"input_tokens": 10},
-            model or "gpt-5",
+            model or "gpt-5.6",
             "content+screenshot",
         )
 
@@ -59,7 +59,7 @@ def test_ai_analyze_endpoint_returns_html_without_persisting_api_key(tmp_path: P
             json={
                 "provider": "openai",
                 "api_key": "secret-key-123",
-                "model": "gpt-5",
+                "model": "gpt-5.6",
                 "scope": "security_full",
                 "symbol": "600519.SH",
                 "include_latest_refresh": False,
@@ -71,7 +71,7 @@ def test_ai_analyze_endpoint_returns_html_without_persisting_api_key(tmp_path: P
         assert response.status_code == 200
         payload = response.json()
         assert payload["provider"] == "openai"
-        assert payload["model"] == "gpt-5"
+        assert payload["model"] == "gpt-5.6"
         assert payload["input_mode"] == "content+screenshot"
         assert "report_html" in payload
         assert "pdf_base64" not in payload
@@ -113,9 +113,9 @@ def test_ai_provider_payloads_support_text_and_image_modes() -> None:
     assert "openai report" in openai_html
     assert "claude report" in claude_html
     assert "deepseek report" in deepseek_html
-    assert openai_model == "gpt-5"
+    assert openai_model == "gpt-5.6"
     assert claude_model == "claude-sonnet-5"
-    assert deepseek_model == "deepseek-v4-flash"
+    assert deepseek_model == "deepseek-v4-pro"
     assert openai_mode == "content+screenshot"
     assert claude_mode == "content+screenshot"
     assert deepseek_mode == "content"
@@ -138,7 +138,7 @@ def test_ai_report_spec_is_loaded_into_prompt() -> None:
         return httpx.Response(200, json={"output_text": "<h1>report</h1>"})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    generate_html_analysis("openai", "key", "gpt-5", {"scope": "current_page"}, client=client)
+    generate_html_analysis("openai", "key", "gpt-5.6", {"scope": "current_page"}, client=client)
     body = requests[0].content.decode()
     assert "AI Report Specification" in body
     assert "行情层" in body
@@ -146,7 +146,92 @@ def test_ai_report_spec_is_loaded_into_prompt() -> None:
 
 
 def test_model_screenshot_capabilities_are_provider_specific() -> None:
-    assert model_supports_screenshot("openai", "gpt-5")
+    assert model_supports_screenshot("openai", "gpt-5.6")
     assert model_supports_screenshot("anthropic", "claude-sonnet-5")
+    assert not model_supports_screenshot("deepseek", "deepseek-v4-pro")
     assert not model_supports_screenshot("deepseek", "deepseek-v4-flash")
     assert model_supports_screenshot("deepseek", "deepseek-vl")
+
+
+def test_ai_check_endpoint_is_sanitized(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "ai-check.duckdb"
+    app = create_app(db_path)
+    captured: dict[str, Any] = {}
+
+    def fake_check(provider: str, api_key: str, model: str | None) -> tuple[bool, dict[str, Any], str, str]:
+        captured["api_key"] = api_key
+        return True, {"input_tokens": 1}, model or "deepseek-v4-pro", "AI provider responded."
+
+    monkeypatch.setattr("app.main.check_ai_connection", fake_check)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/ai/check",
+            json={"provider": "deepseek", "api_key": "secret-key-456", "model": "deepseek-v4-pro"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["model"] == "deepseek-v4-pro"
+        assert "secret-key-456" not in json.dumps(payload, ensure_ascii=False)
+        assert captured["api_key"] == "secret-key-456"
+
+
+def test_ai_check_endpoint_failure_does_not_echo_key(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "ai-check-failure.duckdb"
+    app = create_app(db_path)
+
+    def fake_check(provider: str, api_key: str, model: str | None) -> tuple[bool, dict[str, Any], str, str]:
+        raise RuntimeError(f"bad key {api_key}")
+
+    monkeypatch.setattr("app.main.check_ai_connection", fake_check)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/ai/check",
+            json={"provider": "openai", "api_key": "secret-key-789", "model": "gpt-5.6"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is False
+        assert "secret-key-789" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_security_full_context_includes_daily_indicator_context(monkeypatch) -> None:
+    class FakeRepository:
+        def list_source_health(self) -> list[dict[str, Any]]:
+            return []
+
+        def chart_bars(self, symbol: str, limit: int = 500, adjustment: str = "auto") -> list[dict[str, Any]]:
+            return [
+                {"symbol": symbol, "trade_date": "2026-07-17", "close": 10.0},
+                {"symbol": symbol, "trade_date": "2026-07-20", "close": 11.0},
+            ]
+
+        def get_security_overview(self, symbol: str) -> dict[str, Any]:
+            return {"security": {"symbol": symbol, "name": "Demo"}, "market": None, "quote": None, "freshness": [], "module_snapshots": []}
+
+    def fake_indicators(symbol: str, indicator_ids: tuple[str, ...], start: str, end: str, frequency: str, fq: str) -> list[dict[str, Any]]:
+        assert frequency == "1d"
+        assert "macd" in indicator_ids
+        return [
+            {"date": "2026-07-17", "dif": 1.0, "dea": 0.8, "macd": 0.2, "rsi": 55.0},
+            {"date": "2026-07-20", "dif": 1.1, "dea": 0.9, "macd": 0.3, "rsi": 58.0},
+        ]
+
+    monkeypatch.setattr("app.ai_analysis.fetch_free_stockdb_indicators", fake_indicators)
+    context = build_analysis_context(
+        FakeRepository(),  # type: ignore[arg-type]
+        scope="security_full",
+        symbol="600519.SH",
+        module_id=None,
+        period="1d",
+        page_content={},
+        include_latest_refresh=False,
+    )
+    daily = context["daily_indicator_context"]
+    assert daily["period"] == "1d"
+    assert daily["row_count"] == 2
+    assert len(daily["rows"]) <= 500
+    assert any(item["id"] == "macd" and item["status"] == "fresh" for item in daily["indicator_coverage"])
+    assert any(item["id"] == "macd" for item in daily["indicator_catalog"])

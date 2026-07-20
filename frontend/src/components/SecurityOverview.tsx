@@ -20,7 +20,6 @@ interface SecurityOverviewProps {
   chartPeriod: ChartPeriod;
   onChartPeriodChange: (period: ChartPeriod) => void;
   onRefreshMarket: () => void;
-  onPrintSecurity: () => void;
   marketRefreshing: boolean;
   searchQuery: string;
   searchResults: Security[];
@@ -145,7 +144,6 @@ export function SecurityOverview({
   chartPeriod,
   onChartPeriodChange,
   onRefreshMarket,
-  onPrintSecurity,
   marketRefreshing,
   searchQuery,
   searchResults,
@@ -258,7 +256,6 @@ export function SecurityOverview({
         loading={chartLoading}
         error={chartError}
         onRefresh={onRefreshMarket}
-        onPrintSecurity={onPrintSecurity}
         refreshing={marketRefreshing}
         searchQuery={searchQuery}
         searchResults={searchResults}

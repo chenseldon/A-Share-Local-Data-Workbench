@@ -1,6 +1,5 @@
-import { Activity, Database, Gauge, Layers, PanelLeftClose, PanelLeftOpen, Server } from "lucide-react";
+import { Activity, Boxes, Gauge, Layers, PanelLeftClose, PanelLeftOpen, Server } from "lucide-react";
 import type { ModuleDefinition, SourceHealth } from "../types";
-import { StatusBadge } from "./StatusBadge";
 
 interface SidebarProps {
   modules: ModuleDefinition[];
@@ -62,12 +61,12 @@ export function Sidebar({
             className={activeView === "module" && activeModule === module.id ? "module-item active" : "module-item"}
             onClick={() => onSelectModule(module.id)}
           >
-            <Database aria-hidden="true" size={16} />
+            <Boxes aria-hidden="true" size={16} />
             <span className="module-copy">
               <span>{module.label}</span>
               <small>{module.layer}</small>
             </span>
-            <StatusBadge status={module.status} />
+            <span className={module.status === "configured" ? "module-version-badge ok" : "module-version-badge bad"}>V.1.0</span>
           </button>
         ))}
       </nav>

@@ -16,7 +16,6 @@ import {
   Minus,
   MousePointer2,
   Plus,
-  Printer,
   RefreshCw,
   Ruler,
   Search,
@@ -57,7 +56,6 @@ interface KLineChartProps {
   loading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
-  onPrintSecurity?: () => void;
   refreshing?: boolean;
   searchQuery?: string;
   searchResults?: Security[];
@@ -303,7 +301,6 @@ export function KLineChart(props: KLineChartProps) {
     loading,
     error,
     onRefresh,
-    onPrintSecurity,
     refreshing,
     searchQuery = "",
     searchResults = [],
@@ -1058,12 +1055,6 @@ export function KLineChart(props: KLineChartProps) {
                 </div>
               )}
             </div>
-            {onPrintSecurity && (
-              <button className="secondary-button" type="button" onClick={onPrintSecurity}>
-                <Printer aria-hidden="true" size={15} />
-                PDF Print
-              </button>
-            )}
           </div>
           {onRefresh && (
             <div className="chart-action-stack">

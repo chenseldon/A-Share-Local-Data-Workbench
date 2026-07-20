@@ -38,6 +38,13 @@ Use these sections in order. Keep sections concise, evidence-backed, and traceab
 11. 反证与失效条件
 12. 数据质量与来源限制
 
+## Indicator Layer Rules
+
+- 指标层必须优先使用 `daily_indicator_context`，而不是只看当前 K 线图上已经勾选的指标。
+- 日线指标必须覆盖 `indicator_catalog` 中的全部指标，并参考 `indicator_coverage` 判断字段可用性。
+- 对 `status=no_data`、`status=failed` 或缺失字段的指标，必须明确写成“无数据/失败/不可用”，不得补全或推断。
+- 如果指标之间互相冲突，必须分别说明趋势、动量、波动率、量能和资金类指标给出的相反证据。
+
 ## Scoring Rules
 
 - `看多`: evidence is broadly supportive, with manageable contrary evidence.

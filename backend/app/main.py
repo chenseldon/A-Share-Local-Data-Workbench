@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from time import perf_counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
@@ -13,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .ai_analysis import AnalysisScope, Provider, build_analysis_context, generate_html_analysis
+from .ai_analysis import AnalysisScope, DEFAULT_MODELS, Provider, build_analysis_context, check_ai_connection, generate_html_analysis
 from .connectors.astock_sources import (
     AStockSourceError,
     block_trade,
@@ -68,6 +69,12 @@ class AiAnalysisRequest(BaseModel):
     page_content: Any | None = None
     screenshot_base64: str | None = None
     period: str = Field(default="1d", pattern="^(1m|5m|15m|30m|60m|1d|1w|1M)$")
+
+
+class AiCheckRequest(BaseModel):
+    provider: Provider
+    api_key: str = Field(min_length=1)
+    model: str | None = None
 
 
 def should_remote_resolve(query: str) -> bool:
@@ -328,6 +335,34 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
             "report_html": report_html,
             "report_text": report_text,
             "input_mode": input_mode,
+            "usage": usage,
+        }
+
+    @app.post("/api/ai/check")
+    def ai_check(request: AiCheckRequest) -> dict[str, object]:
+        started_at = perf_counter()
+        selected_model = request.model or DEFAULT_MODELS[request.provider]
+        try:
+            ok, usage, selected_model, message = check_ai_connection(
+                request.provider,
+                request.api_key,
+                request.model,
+            )
+        except Exception:  # noqa: BLE001 - never echo provider errors because they can contain sensitive request context.
+            return {
+                "ok": False,
+                "provider": request.provider,
+                "model": selected_model,
+                "latency_ms": round((perf_counter() - started_at) * 1000),
+                "message": "AI provider check failed. Verify the API key, model name, provider access, and network connectivity.",
+                "usage": None,
+            }
+        return {
+            "ok": ok,
+            "provider": request.provider,
+            "model": selected_model,
+            "latency_ms": round((perf_counter() - started_at) * 1000),
+            "message": message,
             "usage": usage,
         }
 

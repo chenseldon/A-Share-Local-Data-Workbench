@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   type ChartPeriod,
+  checkAiConnection,
   fetchConnectorCapabilities,
   fetchHealth,
   fetchSecurityBoards,
@@ -17,7 +18,7 @@ import {
   refreshSecurityUniverse,
   searchSecurities
 } from "./api";
-import { AiRightRail } from "./components/AiRightRail";
+import { AiRightRail, aiDefaultModels } from "./components/AiRightRail";
 import { ModuleView } from "./components/ModuleView";
 import { SecurityOverview } from "./components/SecurityOverview";
 import { Sidebar } from "./components/Sidebar";
@@ -27,6 +28,7 @@ import { fallbackModules } from "./data/fallbackModules";
 import type {
   AiAnalysisResponse,
   AiAnalysisScope,
+  AiCheckResponse,
   AiProvider,
   DataJob,
   BoardMappingResponse,
@@ -45,12 +47,6 @@ const backgroundRefreshModules = ["fundamentals", "announcements", "news", "repo
 const modulePrefetchModules = ["market", "fundamentals", "announcements", "news", "reports", "chip_liquidity", "signals", "etf_options"];
 const etfOptionUnderlyings = new Set(["510050.SH", "510300.SH", "588000.SH", "510500.SH"]);
 const universeReadyCount = 7400;
-const aiDefaultModels: Record<AiProvider, string> = {
-  openai: "gpt-5",
-  anthropic: "claude-sonnet-5",
-  deepseek: "deepseek-v4-flash"
-};
-
 interface UpdateProgress {
   active: boolean;
   percent: number;
@@ -70,7 +66,9 @@ interface AiAnalystState {
   moduleId: string;
   includeLatestRefresh: boolean;
   loading: boolean;
+  checking: boolean;
   error: string | null;
+  checkResult: AiCheckResponse | null;
   result: AiAnalysisResponse | null;
 }
 
@@ -238,6 +236,7 @@ export default function App() {
   const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
+  const [rightPanelWidth, setRightPanelWidth] = useState(440);
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
@@ -255,7 +254,9 @@ export default function App() {
     moduleId: "market",
     includeLatestRefresh: false,
     loading: false,
+    checking: false,
     error: null,
+    checkResult: null,
     result: null,
   });
 
@@ -696,6 +697,11 @@ export default function App() {
   }
 
   function openRightPanel(panel: "settings" | "ai") {
+    if (rightPanelOpen && rightPanel === panel) {
+      setRightPanelOpen(false);
+      setAiAnalyst((current) => ({ ...current, apiKey: "", checkResult: null }));
+      return;
+    }
     setRightPanel(panel);
     setRightPanelOpen(true);
   }
@@ -703,7 +709,7 @@ export default function App() {
   function toggleRightPanelOpen() {
     setRightPanelOpen((open) => {
       if (open) {
-        setAiAnalyst((current) => ({ ...current, apiKey: "" }));
+        setAiAnalyst((current) => ({ ...current, apiKey: "", checkResult: null }));
         return false;
       }
       setRightPanel((panel) => panel ?? "ai");
@@ -716,7 +722,26 @@ export default function App() {
       ...current,
       ...settings,
       error: null,
+      checkResult: null,
     }));
+  }
+
+  async function checkAiSettings() {
+    if (!aiAnalyst.apiKey.trim()) {
+      setAiAnalyst((current) => ({ ...current, error: "API key is required for connection check." }));
+      return;
+    }
+    setAiAnalyst((current) => ({ ...current, checking: true, error: null, checkResult: null }));
+    try {
+      const result = await checkAiConnection({
+        provider: aiAnalyst.provider,
+        api_key: aiAnalyst.apiKey,
+        model: aiAnalyst.model,
+      });
+      setAiAnalyst((current) => ({ ...current, checking: false, checkResult: result, error: result.ok ? null : result.message }));
+    } catch (error: unknown) {
+      setAiAnalyst((current) => ({ ...current, checking: false, checkResult: null, error: errorMessage(error) }));
+    }
   }
 
   async function runAiAnalyst() {
@@ -850,9 +875,10 @@ export default function App() {
     dashboardCollapsed ? "dashboard-collapsed" : "",
     rightPanelOpen ? "right-panel-open" : "",
   ].filter(Boolean).join(" ");
+  const shellStyle = { "--right-panel-width": `${rightPanelWidth}px` } as CSSProperties;
 
   return (
-    <div className={shellClass}>
+    <div className={shellClass} style={shellStyle}>
       <Sidebar
         modules={modules}
         activeView={activeView}
@@ -894,7 +920,6 @@ export default function App() {
               chartPeriod={chartPeriod}
               onChartPeriodChange={handleChartPeriodChange}
               onRefreshMarket={refreshCurrentView}
-              onPrintSecurity={printWorkspace}
               marketRefreshing={marketRefreshing}
               searchQuery={query}
               searchResults={searchResults}
@@ -961,11 +986,15 @@ export default function App() {
         moduleId={aiAnalyst.moduleId}
         includeLatestRefresh={aiAnalyst.includeLatestRefresh}
         loading={aiAnalyst.loading}
+        checking={aiAnalyst.checking}
         error={aiAnalyst.error}
+        checkResult={aiAnalyst.checkResult}
         result={aiAnalyst.result}
         onToggleOpen={toggleRightPanelOpen}
         onSelectPanel={openRightPanel}
         onSettingsChange={updateAiSettings}
+        onCheckConnection={checkAiSettings}
+        onPrintWorkspace={printWorkspace}
         onScopeChange={(scope) => setAiAnalyst((current) => ({ ...current, scope, error: null }))}
         onModuleIdChange={(moduleId) => setAiAnalyst((current) => ({ ...current, moduleId }))}
         onIncludeLatestRefreshChange={(enabled) => setAiAnalyst((current) => ({ ...current, includeLatestRefresh: enabled }))}
@@ -973,6 +1002,9 @@ export default function App() {
         onCopyReport={copyAiReport}
         onPrintReport={printAiReport}
         onDownloadReport={downloadAiReport}
+        panelWidth={rightPanelWidth}
+        onPanelWidthChange={setRightPanelWidth}
+        onPanelWidthReset={() => setRightPanelWidth(440)}
       />
     </div>
   );

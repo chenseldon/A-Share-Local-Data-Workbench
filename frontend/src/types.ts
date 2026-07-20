@@ -407,3 +407,18 @@ export interface AiAnalysisResponse {
   input_mode: AiInputMode;
   usage?: Record<string, unknown> | null;
 }
+
+export interface AiCheckRequest {
+  provider: AiProvider;
+  api_key: string;
+  model?: string | null;
+}
+
+export interface AiCheckResponse {
+  ok: boolean;
+  provider: AiProvider;
+  model: string;
+  latency_ms: number;
+  message: string;
+  usage?: Record<string, unknown> | null;
+}

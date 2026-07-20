@@ -1,6 +1,8 @@
 import type {
   AiAnalysisRequest,
   AiAnalysisResponse,
+  AiCheckRequest,
+  AiCheckResponse,
   BoardMappingResponse,
   ChartResponse,
   ConnectorCapability,
@@ -127,6 +129,10 @@ export function fetchSecurityBoards(symbol: string): Promise<BoardMappingRespons
 
 export function generateAiAnalysis(request: AiAnalysisRequest): Promise<AiAnalysisResponse> {
   return apiPostJson<AiAnalysisResponse>("/api/ai/analyze", request);
+}
+
+export function checkAiConnection(request: AiCheckRequest): Promise<AiCheckResponse> {
+  return apiPostJson<AiCheckResponse>("/api/ai/check", request);
 }
 
 export function fetchModuleData(moduleId: string, symbol: string | null): Promise<ModuleDataResponse> {
