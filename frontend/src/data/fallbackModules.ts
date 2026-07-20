@@ -13,50 +13,6 @@ export const fallbackModules: ModuleDefinition[] = [
     capabilities: { wired: 3, optional_dependency_missing: 2 }
   },
   {
-    id: "reports",
-    label: "Research Reports",
-    layer: "研报层",
-    description: "Company reports, industry reports, ratings, PDF links, consensus EPS and natural-language search.",
-    status: "configured",
-    tables: ["reports"],
-    sources: ["Eastmoney reportapi", "10jqka", "iwencai optional"],
-    planned_fields: ["company reports", "industry reports", "ratings", "EPS forecast", "PDF URL"],
-    capabilities: { wired: 2, prepared: 1, needs_key: 1, optional_dependency_missing: 1 }
-  },
-  {
-    id: "signals",
-    label: "Signals",
-    layer: "信号层",
-    description: "Strong stocks, theme attribution, northbound flow, sector ownership, ranking and event-driven signals.",
-    status: "configured",
-    tables: ["module_records"],
-    sources: ["Eastmoney", "free-stockdb", "10jqka planned", "HKEX boundary"],
-    planned_fields: ["sector mapping", "minute fund flow", "dragon tiger list", "industry ranking", "northbound boundary"],
-    capabilities: { wired: 5, prepared: 1, planned: 1 }
-  },
-  {
-    id: "chip_liquidity",
-    label: "Chip And Liquidity",
-    layer: "资金面 / 筹码层",
-    description: "Margin financing, block trades, shareholder counts, dividends and multi-horizon money flow.",
-    status: "configured",
-    tables: ["money_flow", "module_records"],
-    sources: ["Eastmoney datacenter", "Eastmoney push2"],
-    planned_fields: ["margin financing", "block trades", "shareholder counts", "dividends", "120-day money flow"],
-    capabilities: { wired: 5, prepared: 1 }
-  },
-  {
-    id: "news",
-    label: "News",
-    layer: "新闻层",
-    description: "Company news, CLS telegrams and global market context with mutually backed sources.",
-    status: "configured",
-    tables: ["module_records"],
-    sources: ["Eastmoney", "CLS"],
-    planned_fields: ["company news", "CLS telegrams", "global information"],
-    capabilities: { wired: 3 }
-  },
-  {
     id: "fundamentals",
     label: "Fundamentals",
     layer: "基础数据",
@@ -79,15 +35,48 @@ export const fallbackModules: ModuleDefinition[] = [
     capabilities: { wired: 1, prepared: 2, optional_dependency_missing: 1 }
   },
   {
-    id: "limit_up",
-    label: "Limit-Up Board",
-    layer: "打板层",
-    description: "Limit-up, broken-board, down-limit, yesterday limit-up, theme reason and board-height structure.",
+    id: "news",
+    label: "News",
+    layer: "新闻层",
+    description: "Company news, CLS telegrams and global market context with mutually backed sources.",
     status: "configured",
-    tables: ["module_records", "limit_up_pool legacy"],
-    sources: ["Eastmoney push2ex", "10jqka"],
-    planned_fields: ["limit-up pool", "broken-board pool", "limit-down pool", "yesterday limit-up", "limit-up reason", "board ladder"],
-    capabilities: { wired: 6 }
+    tables: ["module_records"],
+    sources: ["Eastmoney", "CLS"],
+    planned_fields: ["company news", "CLS telegrams", "global information"],
+    capabilities: { wired: 3 }
+  },
+  {
+    id: "reports",
+    label: "Research Reports",
+    layer: "研报层",
+    description: "Company reports, industry reports, ratings, PDF links, consensus EPS and natural-language search.",
+    status: "configured",
+    tables: ["reports"],
+    sources: ["Eastmoney reportapi", "10jqka", "iwencai optional"],
+    planned_fields: ["company reports", "industry reports", "ratings", "EPS forecast", "PDF URL"],
+    capabilities: { wired: 2, prepared: 1, needs_key: 1, optional_dependency_missing: 1 }
+  },
+  {
+    id: "chip_liquidity",
+    label: "Chip And Liquidity",
+    layer: "资金面 / 筹码层",
+    description: "Margin financing, block trades, shareholder counts, dividends and multi-horizon money flow.",
+    status: "configured",
+    tables: ["money_flow", "module_records"],
+    sources: ["Eastmoney datacenter", "Eastmoney push2"],
+    planned_fields: ["margin financing", "block trades", "shareholder counts", "dividends", "120-day money flow"],
+    capabilities: { wired: 5, prepared: 1 }
+  },
+  {
+    id: "signals",
+    label: "Signals",
+    layer: "信号层",
+    description: "Strong stocks, theme attribution, northbound flow, sector ownership, ranking and event-driven signals.",
+    status: "configured",
+    tables: ["module_records"],
+    sources: ["Eastmoney", "free-stockdb", "10jqka planned", "HKEX boundary"],
+    planned_fields: ["sector mapping", "minute fund flow", "dragon tiger list", "industry ranking", "northbound boundary"],
+    capabilities: { wired: 5, prepared: 1, planned: 1 }
   },
   {
     id: "etf_options",
@@ -99,16 +88,5 @@ export const fallbackModules: ModuleDefinition[] = [
     sources: ["Sina hq.sinajs"],
     planned_fields: ["option chain", "T quote", "Delta", "Gamma", "Theta", "Vega", "IV"],
     capabilities: { wired: 3 }
-  },
-  {
-    id: "sentiment",
-    label: "Sentiment",
-    layer: "舆情互动层",
-    description: "Investor Q&A, hot rankings, popularity rankings and concept matches.",
-    status: "configured",
-    tables: ["module_records"],
-    sources: ["CNINFO Hudongyi", "10jqka", "Eastmoney"],
-    planned_fields: ["interactive Q&A", "10jqka hot ranking", "Eastmoney popularity", "concept hit"],
-    capabilities: { wired: 4 }
   }
 ];

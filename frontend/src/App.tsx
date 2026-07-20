@@ -36,7 +36,9 @@ import type {
 } from "./types";
 
 type ActiveView = "security" | "module" | "system";
-const backgroundRefreshModules = ["fundamentals", "announcements", "reports", "signals", "chip_liquidity", "news"];
+const backgroundRefreshModules = ["fundamentals", "announcements", "news", "reports", "chip_liquidity", "signals"];
+const modulePrefetchModules = ["market", "fundamentals", "announcements", "news", "reports", "chip_liquidity", "signals", "etf_options"];
+const etfOptionUnderlyings = new Set(["510050.SH", "510300.SH", "588000.SH", "510500.SH"]);
 const universeReadyCount = 7400;
 
 interface UpdateProgress {
@@ -52,6 +54,14 @@ interface ToastState {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown request failure.";
+}
+
+function moduleCacheKey(moduleId: string, symbol: string | null): string {
+  return `${moduleId}:${symbol ?? ""}`;
+}
+
+function shouldRefreshEtfOptions(moduleId: string, symbol: string | null): boolean {
+  return moduleId === "etf_options" || (symbol !== null && etfOptionUnderlyings.has(symbol.toUpperCase()));
 }
 
 export default function App() {
@@ -80,6 +90,7 @@ export default function App() {
   const [moduleLoading, setModuleLoading] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const refreshFirstSymbolRef = useRef<string | null>(null);
+  const moduleDataCacheRef = useRef<Record<string, ModuleDataResponse>>({});
 
   const [sources, setSources] = useState<SourceHealth[]>([]);
   const [jobs, setJobs] = useState<DataJob[]>([]);
@@ -196,12 +207,22 @@ export default function App() {
   }, [selectedSymbol, chartIndicatorKey, chartPeriod]);
 
   const loadModule = useCallback(() => {
+    const cacheKey = moduleCacheKey(activeModule, selectedSymbol);
+    const cached = moduleDataCacheRef.current[cacheKey];
+    if (cached) {
+      setModuleData(cached);
+    }
     setModuleLoading(true);
     setModuleError(null);
     fetchModuleData(activeModule, selectedSymbol)
-      .then(setModuleData)
+      .then((response) => {
+        setModuleData(response);
+        moduleDataCacheRef.current = { ...moduleDataCacheRef.current, [cacheKey]: response };
+      })
       .catch((error: unknown) => {
-        setModuleData(null);
+        if (!cached) {
+          setModuleData(null);
+        }
         setModuleError(errorMessage(error));
       })
       .finally(() => setModuleLoading(false));
@@ -282,19 +303,40 @@ export default function App() {
       setUpdateProgress({ active: true, percent: 35, message: "Refreshing market and K-line data..." });
       await refreshSecurity(targetSymbol, false);
       setUpdateProgress({ active: true, percent: 55, message: "Refreshing module data..." });
-      const moduleResults = await Promise.allSettled(backgroundRefreshModules.map((moduleId) => refreshModule(moduleId, targetSymbol)));
+      const refreshModules = shouldRefreshEtfOptions(activeModule, targetSymbol)
+        ? [...backgroundRefreshModules, "etf_options"]
+        : backgroundRefreshModules;
+      const moduleResults = await Promise.allSettled(refreshModules.map((moduleId) => refreshModule(moduleId, targetSymbol)));
       moduleResults.forEach((result, index) => {
         if (result.status === "rejected") {
-          failures.push(backgroundRefreshModules[index]);
+          failures.push(refreshModules[index]);
         }
       });
       setUpdateProgress({ active: true, percent: 85, message: "Updating view..." });
-      const [overviewResponse, chartResponse] = await Promise.all([
+      const [overviewResponse, chartResponse, prefetchResults] = await Promise.all([
         fetchSecurityOverview(targetSymbol),
-        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod)
+        fetchSecurityChart(targetSymbol, chartIndicators, chartPeriod),
+        Promise.allSettled(modulePrefetchModules.map((moduleId) => fetchModuleData(moduleId, targetSymbol)))
       ]);
       setOverview(overviewResponse);
       setChart(chartResponse);
+      const prefetched: Record<string, ModuleDataResponse> = {};
+      prefetchResults.forEach((result, index) => {
+        const moduleId = modulePrefetchModules[index];
+        if (result.status === "fulfilled") {
+          prefetched[moduleCacheKey(moduleId, targetSymbol)] = result.value;
+        } else if (moduleId === activeModule && activeView === "module") {
+          setModuleError(errorMessage(result.reason));
+        }
+      });
+      moduleDataCacheRef.current = { ...moduleDataCacheRef.current, ...prefetched };
+      if (activeView === "module") {
+        const activePrefetched = prefetched[moduleCacheKey(activeModule, targetSymbol)];
+        if (activePrefetched) {
+          setModuleData(activePrefetched);
+          setModuleError(null);
+        }
+      }
       await fetchSecurityBoards(targetSymbol)
         .then((response) => {
           setBoards(response);
@@ -307,11 +349,6 @@ export default function App() {
       await fetchSourceHealth()
         .then((response) => setSources(response.rows))
         .catch(() => setSources([]));
-      if (activeView === "module") {
-        await fetchModuleData(activeModule, targetSymbol)
-          .then(setModuleData)
-          .catch((error: unknown) => setModuleError(errorMessage(error)));
-      }
       setUpdateProgress({ active: true, percent: 100, message: failures.length ? "Update finished with failed modules." : "Update complete." });
       setToast({
         kind: failures.length ? "failed" : "success",

@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import AsyncIterator
-from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,14 +14,7 @@ from .connectors.astock_sources import (
     AStockSourceError,
     block_trade,
     cninfo_announcements,
-    cninfo_irm,
     dividend_history,
-    em_dt_pool,
-    em_hot_concept,
-    em_hot_rank,
-    em_yzt_pool,
-    em_zb_pool,
-    em_zt_pool,
     eastmoney_concept_blocks,
     eastmoney_dragon_tiger_board,
     eastmoney_fund_flow_minute,
@@ -31,7 +23,6 @@ from .connectors.astock_sources import (
     eastmoney_reports,
     eastmoney_stock_info,
     holder_num_change,
-    limit_up_sentiment,
     margin_trading,
     normalize_eastmoney_stock_profile,
     normalize_eastmoney_industry_report,
@@ -39,8 +30,6 @@ from .connectors.astock_sources import (
     sina_etf_option_records,
     sina_financial_report,
     stock_fund_flow_120d,
-    ths_hot_list,
-    ths_limit_up_pool,
 )
 from .connectors.capabilities import capability_summary_by_module, list_capabilities
 from .connectors.news_sources import cls_telegraph, eastmoney_global_news, eastmoney_stock_news
@@ -546,82 +535,6 @@ def _refresh_module(repository: DataRepository, module_id: str, symbol: str | No
             "optional_results": optional_results,
         }
 
-    if module_id == "sentiment":
-        if not symbol:
-            raise ValueError("Sentiment refresh requires a symbol.")
-        records_written = 0
-        optional_results: dict[str, object] = {}
-        fetchers = (
-            ("cninfo_irm", lambda: cninfo_irm(symbol)),
-            ("ths_hot_list", lambda: ths_hot_list(period="hour", top=50)),
-            ("em_hot_rank", lambda: em_hot_rank(top=50)),
-            ("em_hot_concept", lambda: em_hot_concept(symbol)),
-        )
-        for source, fetcher in fetchers:
-            try:
-                records = fetcher()
-                written = repository.save_module_records(records)
-                if not records:
-                    repository.record_source_success("sentiment", source, 0)
-                records_written += written
-                optional_results[source] = {"status": "fresh", "records_written": written}
-            except (AStockSourceError, ValueError) as exc:
-                repository.record_source_failure("sentiment", source, str(exc))
-                optional_results[source] = {"status": "failed", "error": str(exc)}
-        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
-        return {
-            "module": module_id,
-            "symbol": symbol,
-            "status": status,
-            "records_written": records_written,
-            "optional_results": optional_results,
-        }
-
-    if module_id == "limit_up":
-        selected_date = _normalize_limit_trade_date(trade_date)
-        records_written = 0
-        optional_results: dict[str, object] = {}
-        fetched_records: dict[str, list] = {}
-        fetchers = (
-            ("em_zt_pool", lambda: em_zt_pool(selected_date)),
-            ("em_zb_pool", lambda: em_zb_pool(selected_date)),
-            ("em_dt_pool", lambda: em_dt_pool(selected_date)),
-            ("em_yzt_pool", lambda: em_yzt_pool(selected_date)),
-            ("ths_limit_up_pool", lambda: ths_limit_up_pool(selected_date)),
-        )
-        for source, fetcher in fetchers:
-            try:
-                records = fetcher()
-                written = repository.save_module_records(records)
-                if not records:
-                    repository.record_source_success("limit_up", source, 0)
-                fetched_records[source] = records
-                records_written += written
-                optional_results[source] = {"status": "fresh", "records_written": written}
-            except AStockSourceError as exc:
-                fetched_records[source] = []
-                repository.record_source_failure("limit_up", source, str(exc))
-                optional_results[source] = {"status": "failed", "error": str(exc)}
-        sentiment = limit_up_sentiment(
-            selected_date,
-            fetched_records.get("em_zt_pool", []),
-            fetched_records.get("em_zb_pool", []),
-            fetched_records.get("em_dt_pool", []),
-            fetched_records.get("em_yzt_pool", []),
-        )
-        sentiment_written = repository.save_module_records([sentiment])
-        records_written += sentiment_written
-        optional_results["limit_up_sentiment"] = {"status": "fresh", "records_written": sentiment_written}
-        status = "fresh" if any(result.get("status") == "fresh" for result in optional_results.values() if isinstance(result, dict)) else "failed"
-        return {
-            "module": module_id,
-            "symbol": symbol,
-            "trade_date": selected_date,
-            "status": status,
-            "records_written": records_written,
-            "optional_results": optional_results,
-        }
-
     if module_id == "etf_options":
         option_symbol = symbol or "510050.SH"
         try:
@@ -680,21 +593,8 @@ def _default_source_for_module(module_id: str) -> str:
         "signals": "eastmoney_concept_blocks",
         "news": "eastmoney_stock_news",
         "chip_liquidity": "stock_fund_flow_120d",
-        "sentiment": "cninfo_irm",
-        "limit_up": "em_zt_pool",
         "etf_options": "sina_option_codes",
     }.get(module_id, "not_configured")
-
-
-def _normalize_limit_trade_date(value: str | None) -> str:
-    if not value:
-        return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
-    text = value.strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        return text.replace("-", "")
-    if re.fullmatch(r"\d{8}", text):
-        return text
-    raise ValueError("trade_date must use YYYYMMDD or YYYY-MM-DD.")
 
 
 def _parse_indicators(value: str | None) -> tuple[str, ...]:

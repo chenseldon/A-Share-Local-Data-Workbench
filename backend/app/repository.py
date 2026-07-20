@@ -618,22 +618,9 @@ class DataRepository:
 
     def _announcements_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         announcement_rows = self.list_announcements(symbol, limit)
-        latest = announcement_rows[0] if announcement_rows else None
         source_status = self._announcements_source_status()
         latest_time = _latest_fetched_at(announcement_rows)
         sections = [
-            {
-                "id": "cninfo_snapshot",
-                "title": "CNINFO Announcement Snapshot",
-                "source": "cninfo_announcements",
-                "fetched_at": latest_time,
-                "cards": [
-                    {"label": "Announcements", "value": len(announcement_rows)},
-                    {"label": "Latest title", "value": latest.get("title") if latest else None},
-                    {"label": "Latest date", "value": latest.get("published_at") if latest else None},
-                    _source_capability_card(source_status, "cninfo_announcements", "CNINFO full text"),
-                ],
-            },
             {
                 "id": "source_capabilities",
                 "title": "Source Capabilities",
@@ -756,8 +743,6 @@ class DataRepository:
         signals_payload = None
         news_payload = None
         chip_liquidity_payload = None
-        limit_up_payload = None
-        sentiment_payload = None
         etf_options_payload = None
         if module_id == "market":
             quote = self.latest_market_quote(symbol) if symbol else None
@@ -781,15 +766,9 @@ class DataRepository:
         elif module_id == "news":
             rows = self._list_news_records(symbol, limit)
             news_payload = self._news_layer_payload(symbol, limit)
-        elif module_id == "limit_up":
-            rows = self._list_module_records("limit_up", None, limit) + self._list_limit_up(symbol, limit)
-            limit_up_payload = self._limit_up_layer_payload(symbol, limit)
         elif module_id == "etf_options":
             rows = self._list_module_records("etf_options", symbol, limit)
             etf_options_payload = self._etf_options_layer_payload(symbol, limit)
-        elif module_id == "sentiment":
-            rows = self._list_sentiment_records(symbol, limit)
-            sentiment_payload = self._sentiment_layer_payload(symbol, limit)
         else:
             rows = []
         status = "ok" if rows else ("not_collected" if module.status != "not_configured" else "not_configured")
@@ -808,10 +787,6 @@ class DataRepository:
             result["news"] = news_payload
         if chip_liquidity_payload is not None:
             result["chip_liquidity"] = chip_liquidity_payload
-        if limit_up_payload is not None:
-            result["limit_up"] = limit_up_payload
-        if sentiment_payload is not None:
-            result["sentiment"] = sentiment_payload
         if etf_options_payload is not None:
             result["etf_options"] = etf_options_payload
         return result
@@ -848,7 +823,6 @@ class DataRepository:
                     {"label": "Listing date", "value": (latest_profile or {}).get("list_date")},
                     {"label": "Total shares", "value": (latest_profile or {}).get("total_shares")},
                     {"label": "Float shares", "value": (latest_profile or {}).get("float_shares")},
-                    _source_capability_card(source_status, "eastmoney_stock_info", "Eastmoney profile"),
                 ],
             },
             {
@@ -875,7 +849,6 @@ class DataRepository:
                     {"label": "ROE", "value": (latest_fundamental or {}).get("roe")},
                     {"label": "Net profit", "value": _first_present((latest_fundamental or {}).get("net_profit"), (latest_income or {}).get("net_profit"))},
                     {"label": "Revenue", "value": _first_present((latest_fundamental or {}).get("revenue"), (latest_income or {}).get("revenue"))},
-                    _source_capability_card(source_status, "mootdx_finance", "mootdx finance snapshot"),
                 ],
             },
             {
@@ -890,7 +863,6 @@ class DataRepository:
                     {"label": "Latest income period", "value": (latest_income or {}).get("report_period")},
                     {"label": "Latest balance period", "value": (latest_balance or {}).get("report_period")},
                     {"label": "Latest cash-flow period", "value": (latest_cash_flow or {}).get("report_period")},
-                    _source_capability_card(source_status, "sina_financial_report", "Sina statements"),
                 ],
             },
             {
@@ -990,444 +962,14 @@ class DataRepository:
                 )
         return rows
 
-    def _limit_up_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
-        rows = self._list_module_records_by_sources(
-            "limit_up",
-            [
-                "em_zt_pool",
-                "em_zb_pool",
-                "em_dt_pool",
-                "em_yzt_pool",
-                "ths_limit_up_pool",
-                "limit_up_sentiment",
-            ],
-            limit,
-        )
-        limit_rows = [row for row in rows if row.get("source") == "em_zt_pool"]
-        broken_rows = [row for row in rows if row.get("source") == "em_zb_pool"]
-        down_rows = [row for row in rows if row.get("source") == "em_dt_pool"]
-        yesterday_rows = [row for row in rows if row.get("source") == "em_yzt_pool"]
-        ths_rows = [row for row in rows if row.get("source") == "ths_limit_up_pool"]
-        sentiment_rows = [row for row in rows if row.get("source") == "limit_up_sentiment"]
-        sentiment = sentiment_rows[0] if sentiment_rows else {}
-        selected = symbol.upper() if symbol else None
-        selected_hits = [row for row in rows if selected and str(row.get("symbol", "")).upper() == selected]
-        latest_time = _latest_fetched_at(rows)
-        source_status = self._limit_up_source_status()
-        ladder = sentiment.get("ladder") if isinstance(sentiment.get("ladder"), dict) else {}
-        ladder_rows = [
-            {
-                "height": height,
-                "count": count,
-                "source": "limit_up_sentiment",
-                "record_date": sentiment.get("record_date") or sentiment.get("date"),
-                "fetched_at": sentiment.get("fetched_at"),
-            }
-            for height, count in sorted(ladder.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else 0)
-        ]
-        sections = [
-            {
-                "id": "sentiment",
-                "title": "Limit-Up Sentiment",
-                "source": "Eastmoney push2ex four pools",
-                "fetched_at": sentiment.get("fetched_at") or latest_time,
-                "cards": [
-                    {"label": "Limit-up", "value": sentiment.get("limit_up_count", len(limit_rows))},
-                    {"label": "Broken-board", "value": sentiment.get("broken_board_count", len(broken_rows))},
-                    {"label": "Limit-down", "value": sentiment.get("limit_down_count", len(down_rows))},
-                    {"label": "Break rate", "value": sentiment.get("break_rate")},
-                    {"label": "Max height", "value": sentiment.get("max_height")},
-                    {"label": "Promotion rate", "value": sentiment.get("promotion_rate")},
-                ],
-            },
-            {
-                "id": "pool_coverage",
-                "title": "Pool Coverage",
-                "source": "Eastmoney push2ex + 10jqka",
-                "fetched_at": latest_time,
-                "cards": [
-                    {"label": "Yesterday limit-up", "value": len(yesterday_rows)},
-                    {"label": "THS insights", "value": len(ths_rows)},
-                    {"label": "Selected symbol hits", "value": len(selected_hits)},
-                    _source_capability_card(source_status, "em_zt_pool", "EM limit-up"),
-                    _source_capability_card(source_status, "ths_limit_up_pool", "10jqka insight"),
-                ],
-            },
-            {
-                "id": "source_capabilities",
-                "title": "Source Capabilities",
-                "source": "connector_registry",
-                "fetched_at": latest_time,
-                "cards": [
-                    _source_capability_card(source_status, "em_zt_pool", "Limit-up pool"),
-                    _source_capability_card(source_status, "em_zb_pool", "Broken-board pool"),
-                    _source_capability_card(source_status, "em_dt_pool", "Limit-down pool"),
-                    _source_capability_card(source_status, "em_yzt_pool", "Yesterday limit-up"),
-                    _source_capability_card(source_status, "ths_limit_up_pool", "THS reason"),
-                    _source_capability_card(source_status, "limit_up_sentiment", "Sentiment"),
-                ],
-            },
-        ]
-        common_columns = [
-            {"key": "symbol", "label": "Symbol"},
-            {"key": "name", "label": "Name"},
-            {"key": "price", "label": "Price"},
-            {"key": "pct", "label": "Change %"},
-            {"key": "industry", "label": "Industry"},
-            {"key": "zt_stat", "label": "N-day boards"},
-            {"key": "limit_days", "label": "Boards"},
-            {"key": "seal_fund", "label": "Seal fund"},
-            {"key": "break_times", "label": "Breaks"},
-            {"key": "first_seal", "label": "First seal"},
-            {"key": "last_seal", "label": "Last seal"},
-            {"key": "source", "label": "Source"},
-            {"key": "fetched_at", "label": "Fetched at"},
-        ]
-        tables = [
-            {"id": "limit_up_pool", "title": "Eastmoney Limit-Up Pool", "rows": limit_rows, "columns": common_columns},
-            {
-                "id": "broken_board_pool",
-                "title": "Eastmoney Broken-Board Pool",
-                "rows": broken_rows,
-                "columns": [
-                    {"key": "symbol", "label": "Symbol"},
-                    {"key": "name", "label": "Name"},
-                    {"key": "price", "label": "Price"},
-                    {"key": "limit_price", "label": "Limit price"},
-                    {"key": "pct", "label": "Change %"},
-                    {"key": "amplitude", "label": "Amplitude"},
-                    {"key": "speed", "label": "Speed"},
-                    {"key": "break_times", "label": "Breaks"},
-                    {"key": "industry", "label": "Industry"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-            {
-                "id": "limit_down_pool",
-                "title": "Eastmoney Limit-Down Pool",
-                "rows": down_rows,
-                "columns": [
-                    {"key": "symbol", "label": "Symbol"},
-                    {"key": "name", "label": "Name"},
-                    {"key": "price", "label": "Price"},
-                    {"key": "pct", "label": "Change %"},
-                    {"key": "turnover", "label": "Turnover"},
-                    {"key": "seal_fund", "label": "Seal fund"},
-                    {"key": "dt_days", "label": "Down days"},
-                    {"key": "open_times", "label": "Open times"},
-                    {"key": "industry", "label": "Industry"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-            {
-                "id": "yesterday_limit_up_pool",
-                "title": "Eastmoney Yesterday Limit-Up Pool",
-                "rows": yesterday_rows,
-                "columns": [
-                    {"key": "symbol", "label": "Symbol"},
-                    {"key": "name", "label": "Name"},
-                    {"key": "price", "label": "Price"},
-                    {"key": "pct", "label": "Change %"},
-                    {"key": "amplitude", "label": "Amplitude"},
-                    {"key": "speed", "label": "Speed"},
-                    {"key": "y_limit_days", "label": "Yesterday boards"},
-                    {"key": "industry", "label": "Industry"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-            {
-                "id": "ths_limit_up_pool",
-                "title": "10jqka Limit-Up Insight",
-                "rows": ths_rows,
-                "columns": [
-                    {"key": "symbol", "label": "Symbol"},
-                    {"key": "name", "label": "Name"},
-                    {"key": "price", "label": "Price"},
-                    {"key": "pct", "label": "Change %"},
-                    {"key": "reason", "label": "Reason"},
-                    {"key": "board_type", "label": "Board type"},
-                    {"key": "seal_rate", "label": "Seal success"},
-                    {"key": "seal_amount", "label": "Seal amount"},
-                    {"key": "break_times", "label": "Breaks"},
-                    {"key": "first_time", "label": "First time"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-            {
-                "id": "board_ladder",
-                "title": "Consecutive Board Ladder",
-                "rows": ladder_rows,
-                "columns": [
-                    {"key": "height", "label": "Board height"},
-                    {"key": "count", "label": "Count"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "record_date", "label": "Record date"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-        ]
-        return {
-            "symbol": selected,
-            "trade_date": sentiment.get("date") or (rows[0].get("record_date") if rows else None),
-            "sections": sections,
-            "tables": tables,
-            "source_status": source_status,
-            "selected_symbol_hits": selected_hits,
-        }
-
-    def _limit_up_source_status(self) -> list[dict[str, Any]]:
-        rows = self._fetch_all(
-            """
-            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
-            FROM source_health
-            WHERE module = 'limit_up'
-            ORDER BY source
-            """
-        )
-        by_source = {str(row["source"]): row for row in rows}
-        defaults = {
-            "em_zt_pool": {"status": "not_collected", "last_error": None},
-            "em_zb_pool": {"status": "not_collected", "last_error": None},
-            "em_dt_pool": {"status": "not_collected", "last_error": None},
-            "em_yzt_pool": {"status": "not_collected", "last_error": None},
-            "ths_limit_up_pool": {"status": "not_collected", "last_error": "Public 10jqka endpoint may drift or throttle; shown only when refreshed successfully."},
-            "limit_up_sentiment": {"status": "not_collected", "last_error": None},
-        }
-        for source, value in defaults.items():
-            if source not in by_source:
-                rows.append(
-                    {
-                        "source": source,
-                        "module": "limit_up",
-                        "status": value["status"],
-                        "last_success_at": None,
-                        "last_failure_at": None,
-                        "last_error": value["last_error"],
-                        "updated_at": None,
-                    }
-                )
-        return rows
-
-    def _sentiment_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
-        sentiment_rows = self._list_sentiment_records(symbol, limit)
-        irm_rows = [row for row in sentiment_rows if row.get("source") == "cninfo_irm"]
-        ths_rows = [row for row in sentiment_rows if row.get("source") == "ths_hot_list"]
-        em_rank_rows = [row for row in sentiment_rows if row.get("source") == "em_hot_rank"]
-        concept_rows = [row for row in sentiment_rows if row.get("source") == "em_hot_concept"]
-        latest_irm = irm_rows[0] if irm_rows else None
-        latest_ths = ths_rows[0] if ths_rows else None
-        latest_em_rank = em_rank_rows[0] if em_rank_rows else None
-        latest_concept = concept_rows[0] if concept_rows else None
-        selected_upper = symbol.upper() if symbol else None
-        current_ths_rank = next((row for row in ths_rows if selected_upper and str(row.get("symbol", "")).upper() == selected_upper), None)
-        current_em_rank = next((row for row in em_rank_rows if selected_upper and str(row.get("symbol", "")).upper() == selected_upper), None)
-        answered = sum(1 for row in irm_rows if row.get("answered"))
-        source_status = self._sentiment_source_status()
-        latest_time = _latest_fetched_at(sentiment_rows)
-        sections = [
-            {
-                "id": "investor_qa",
-                "title": "Investor Q&A Snapshot",
-                "source": "cninfo_irm",
-                "fetched_at": _latest_fetched_at(irm_rows),
-                "cards": [
-                    {"label": "Questions", "value": len(irm_rows)},
-                    {"label": "Answered", "value": answered},
-                    {"label": "Unanswered", "value": len(irm_rows) - answered},
-                    {"label": "Latest question", "value": latest_irm.get("question") if latest_irm else None},
-                    {"label": "Latest answerer", "value": latest_irm.get("answerer") if latest_irm else None},
-                    _source_capability_card(source_status, "cninfo_irm", "CNINFO IRM"),
-                ],
-            },
-            {
-                "id": "ths_hot_list",
-                "title": "10jqka Hot List Snapshot",
-                "source": "ths_hot_list",
-                "fetched_at": _latest_fetched_at(ths_rows),
-                "cards": [
-                    {"label": "Hot list rows", "value": len(ths_rows)},
-                    {"label": "Top name", "value": latest_ths.get("name") if latest_ths else None},
-                    {"label": "Top heat", "value": latest_ths.get("heat") if latest_ths else None},
-                    {"label": "Selected rank", "value": current_ths_rank.get("rank") if current_ths_rank else None},
-                    {"label": "Concept tags", "value": latest_ths.get("concepts") if latest_ths else None},
-                    _source_capability_card(source_status, "ths_hot_list", "10jqka hot list"),
-                ],
-            },
-            {
-                "id": "eastmoney_popularity",
-                "title": "Eastmoney Popularity Snapshot",
-                "source": "em_hot_rank",
-                "fetched_at": _latest_fetched_at(em_rank_rows),
-                "cards": [
-                    {"label": "Popularity rows", "value": len(em_rank_rows)},
-                    {"label": "Top name", "value": latest_em_rank.get("name") if latest_em_rank else None},
-                    {"label": "Top change %", "value": latest_em_rank.get("change_pct") if latest_em_rank else None},
-                    {"label": "Selected rank", "value": current_em_rank.get("rank") if current_em_rank else None},
-                    {"label": "Selected rank change", "value": current_em_rank.get("rank_change") if current_em_rank else None},
-                    _source_capability_card(source_status, "em_hot_rank", "Eastmoney popularity"),
-                ],
-            },
-            {
-                "id": "concept_hit",
-                "title": "Concept Hit Snapshot",
-                "source": "em_hot_concept",
-                "fetched_at": _latest_fetched_at(concept_rows),
-                "cards": [
-                    {"label": "Concept hits", "value": len(concept_rows)},
-                    {"label": "Top concept", "value": latest_concept.get("concept") if latest_concept else None},
-                    {"label": "Top BK", "value": latest_concept.get("bk") if latest_concept else None},
-                    {"label": "Top heat", "value": latest_concept.get("heat") if latest_concept else None},
-                    _source_capability_card(source_status, "em_hot_concept", "Concept hit"),
-                ],
-            },
-            {
-                "id": "source_capabilities",
-                "title": "Source Capabilities",
-                "source": "connector_registry",
-                "fetched_at": latest_time,
-                "cards": [
-                    _source_capability_card(source_status, "cninfo_irm", "Investor Q&A"),
-                    _source_capability_card(source_status, "ths_hot_list", "10jqka hot list"),
-                    _source_capability_card(source_status, "em_hot_rank", "Eastmoney popularity"),
-                    _source_capability_card(source_status, "em_hot_concept", "Concept hits"),
-                ],
-            },
-        ]
-        tables = [
-            {
-                "id": "investor_qa",
-                "title": "CNINFO Investor Q&A",
-                "rows": irm_rows,
-                "columns": [
-                    {"key": "asked_at", "label": "Asked at"},
-                    {"key": "question", "label": "Question"},
-                    {"key": "answer", "label": "Answer"},
-                    {"key": "answerer", "label": "Answerer"},
-                    {"key": "answered", "label": "Answered"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-            {
-                "id": "ths_hot_list",
-                "title": "10jqka Hot List",
-                "rows": ths_rows,
-                "columns": [
-                    {"key": "rank", "label": "Rank"},
-                    {"key": "code", "label": "Code"},
-                    {"key": "name", "label": "Name"},
-                    {"key": "heat", "label": "Heat"},
-                    {"key": "concepts", "label": "Concept tags"},
-                    {"key": "rank_change", "label": "Rank change"},
-                    {"key": "source", "label": "Source"},
-                ],
-            },
-            {
-                "id": "eastmoney_popularity",
-                "title": "Eastmoney Popularity Rank",
-                "rows": em_rank_rows,
-                "columns": [
-                    {"key": "rank", "label": "Rank"},
-                    {"key": "code", "label": "Code"},
-                    {"key": "name", "label": "Name"},
-                    {"key": "price", "label": "Price"},
-                    {"key": "change_pct", "label": "Change %"},
-                    {"key": "rank_change", "label": "Rank change"},
-                    {"key": "source", "label": "Source"},
-                ],
-            },
-            {
-                "id": "concept_hits",
-                "title": "Eastmoney Concept Hits",
-                "rows": concept_rows,
-                "columns": [
-                    {"key": "concept", "label": "Concept"},
-                    {"key": "bk", "label": "BK"},
-                    {"key": "heat", "label": "Heat"},
-                    {"key": "source", "label": "Source"},
-                    {"key": "fetched_at", "label": "Fetched at"},
-                ],
-            },
-        ]
-        return {
-            "symbol": symbol.upper() if symbol else None,
-            "sections": sections,
-            "tables": tables,
-            "source_status": source_status,
-        }
-
-    def _sentiment_source_status(self) -> list[dict[str, Any]]:
-        rows = self._fetch_all(
-            """
-            SELECT source, module, status, last_success_at, last_failure_at, last_error, updated_at
-            FROM source_health
-            WHERE module = 'sentiment'
-            ORDER BY source
-            """
-        )
-        by_source = {str(row["source"]): row for row in rows}
-        defaults = {
-            "cninfo_irm": {"status": "not_collected", "last_error": "CNINFO latest questions may be unanswered; unanswered is not treated as a connector failure."},
-            "ths_hot_list": {"status": "not_collected", "last_error": "10jqka public hot-list endpoint can be rate-limited or field-drift."},
-            "em_hot_rank": {"status": "not_collected", "last_error": "Eastmoney popularity ranking is an appdata feed and not a trading signal."},
-            "em_hot_concept": {"status": "not_collected", "last_error": "Eastmoney concept hits are collected per selected symbol."},
-        }
-        for source, value in defaults.items():
-            if source not in by_source:
-                rows.append(
-                    {
-                        "source": source,
-                        "module": "sentiment",
-                        "status": value["status"],
-                        "last_success_at": None,
-                        "last_failure_at": None,
-                        "last_error": value["last_error"],
-                        "updated_at": None,
-                    }
-                )
-        return rows
-
     def _news_layer_payload(self, symbol: str | None, limit: int) -> dict[str, Any]:
         news_rows = self._list_news_records(symbol, limit)
         stock_news = [row for row in news_rows if row.get("source") == "eastmoney_stock_news"]
         cls_rows = [row for row in news_rows if row.get("source") == "cls_telegraph"]
         global_rows = [row for row in news_rows if row.get("source") == "eastmoney_global_news"]
-        latest_stock = stock_news[0] if stock_news else None
-        latest_cls = cls_rows[0] if cls_rows else None
-        latest_global = global_rows[0] if global_rows else None
         source_status = self._news_source_status()
         latest_time = _latest_fetched_at(news_rows)
         sections = [
-            {
-                "id": "stock_news",
-                "title": "Stock News Snapshot",
-                "source": "eastmoney_stock_news",
-                "fetched_at": _latest_fetched_at(stock_news),
-                "cards": [
-                    {"label": "Stock news", "value": len(stock_news)},
-                    {"label": "Latest title", "value": latest_stock.get("title") if latest_stock else None},
-                    {"label": "Latest media", "value": latest_stock.get("media") if latest_stock else None},
-                    {"label": "Latest time", "value": latest_stock.get("time") if latest_stock else None},
-                    _source_capability_card(source_status, "eastmoney_stock_news", "Eastmoney stock news"),
-                ],
-            },
-            {
-                "id": "market_flash",
-                "title": "Market Flash Snapshot",
-                "source": "cls_telegraph + eastmoney_global_news",
-                "fetched_at": _latest_fetched_at(cls_rows) or _latest_fetched_at(global_rows),
-                "cards": [
-                    {"label": "CLS telegrams", "value": len(cls_rows)},
-                    {"label": "Global news", "value": len(global_rows)},
-                    {"label": "Latest CLS", "value": latest_cls.get("title") if latest_cls else None},
-                    {"label": "Latest global", "value": latest_global.get("title") if latest_global else None},
-                    {"label": "Mutual backup", "value": "CLS v1 + Eastmoney 7x24"},
-                ],
-            },
             {
                 "id": "source_capabilities",
                 "title": "Source Capabilities",
@@ -1540,9 +1082,8 @@ class DataRepository:
                     {"label": "Company reports", "value": len(stock_reports)},
                     {"label": "Industry reports", "value": len(industry_reports)},
                     {"label": "Latest rating", "value": latest_report.get("rating") if latest_report else None},
-                    {"label": "Latest institution", "value": latest_report.get("institution") if latest_report else None},
+                    {"label": "Latest institution", "value": _join_non_empty(latest_report.get("institution"), latest_report.get("analyst")) if latest_report else None},
                     {"label": "Latest report date", "value": latest_report.get("report_date") if latest_report else None},
-                    {"label": "Latest analyst", "value": latest_report.get("analyst") if latest_report else None},
                 ],
             },
             {
@@ -1683,7 +1224,6 @@ class DataRepository:
                     {"label": "Latest time", "value": latest_flow.get("time") if latest_flow else None},
                     {"label": "Main net", "value": latest_flow.get("main_net") if latest_flow else None},
                     {"label": "Super net", "value": latest_flow.get("super_net") if latest_flow else None},
-                    _source_capability_card(source_status, "eastmoney_fund_flow_minute", "Connector"),
                 ],
             },
             {
@@ -1696,7 +1236,6 @@ class DataRepository:
                     {"label": "Latest date", "value": latest_dragon.get("date") if latest_dragon else None},
                     {"label": "Reason", "value": latest_dragon.get("reason") if latest_dragon else None},
                     {"label": "Net buy (wan)", "value": latest_dragon.get("net_buy_wan") if latest_dragon else None},
-                    _source_capability_card(source_status, "eastmoney_dragon_tiger_board", "Connector"),
                 ],
             },
             {
@@ -1709,7 +1248,6 @@ class DataRepository:
                     {"label": "Top industry", "value": top_industry.get("name") if top_industry else None},
                     {"label": "Top change %", "value": top_industry.get("change_pct") if top_industry else None},
                     {"label": "Leader", "value": top_industry.get("leader") if top_industry else None},
-                    _source_capability_card(source_status, "eastmoney_industry_comparison", "Connector"),
                 ],
             },
             {
@@ -2077,7 +1615,6 @@ class DataRepository:
                     {"label": "Margin balance", "value": latest_margin.get("margin_balance") if latest_margin else None},
                     {"label": "Short balance", "value": latest_margin.get("short_balance") if latest_margin else None},
                     {"label": "Total balance", "value": latest_margin.get("margin_short_balance") if latest_margin else None},
-                    _source_capability_card(source_status, "margin_trading", "Connector"),
                 ],
             },
             {
@@ -2091,7 +1628,6 @@ class DataRepository:
                     {"label": "Price", "value": latest_block.get("price") if latest_block else None},
                     {"label": "Premium %", "value": latest_block.get("premium_pct") if latest_block else None},
                     {"label": "Amount", "value": latest_block.get("amount") if latest_block else None},
-                    _source_capability_card(source_status, "block_trade", "Connector"),
                 ],
             },
             {
@@ -2105,7 +1641,6 @@ class DataRepository:
                     {"label": "Holder count", "value": latest_holder.get("holder_num") if latest_holder else None},
                     {"label": "QoQ change %", "value": latest_holder.get("change_ratio") if latest_holder else None},
                     {"label": "Avg shares", "value": latest_holder.get("avg_shares") if latest_holder else None},
-                    _source_capability_card(source_status, "holder_num_change", "Connector"),
                 ],
             },
             {
@@ -2119,7 +1654,6 @@ class DataRepository:
                     {"label": "Cash dividend", "value": latest_dividend.get("bonus_rmb") if latest_dividend else None},
                     {"label": "Transfer ratio", "value": latest_dividend.get("transfer_ratio") if latest_dividend else None},
                     {"label": "Bonus ratio", "value": latest_dividend.get("bonus_ratio") if latest_dividend else None},
-                    _source_capability_card(source_status, "dividend_history", "Connector"),
                 ],
             },
             {
@@ -2133,7 +1667,6 @@ class DataRepository:
                     {"label": "Main net inflow", "value": latest_flow.get("main_net_inflow") if latest_flow else None},
                     {"label": "Retail net inflow", "value": latest_flow.get("retail_net_inflow") if latest_flow else None},
                     {"label": "Turnover rate", "value": latest_flow.get("turnover_rate") if latest_flow else None},
-                    _source_capability_card(source_status, "stock_fund_flow_120d", "Connector"),
                 ],
             },
             {
@@ -2411,28 +1944,6 @@ class DataRepository:
             (limit,),
         )
 
-    def _list_limit_up(self, symbol: str | None, limit: int) -> list[dict[str, Any]]:
-        if symbol:
-            return self._fetch_all(
-                """
-                SELECT trade_date, symbol, name, reason, board_count, status, source, fetched_at
-                FROM limit_up_pool
-                WHERE upper(symbol) = ?
-                ORDER BY trade_date DESC
-                LIMIT ?
-                """,
-                (symbol.upper(), limit),
-            )
-        return self._fetch_all(
-            """
-            SELECT trade_date, symbol, name, reason, board_count, status, source, fetched_at
-            FROM limit_up_pool
-            ORDER BY trade_date DESC, board_count DESC NULLS LAST
-            LIMIT ?
-            """,
-            (limit,),
-        )
-
     def list_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
         return self._fetch_all(
             """
@@ -2540,36 +2051,6 @@ class DataRepository:
             )
         return [_flatten_module_record(row) for row in rows]
 
-    def _list_sentiment_records(self, symbol: str | None, limit: int) -> list[dict[str, Any]]:
-        if symbol:
-            rows = self._fetch_all(
-                """
-                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
-                FROM module_records
-                WHERE module = 'sentiment'
-                  AND (
-                    upper(coalesce(symbol, '')) = ?
-                    OR source IN ('ths_hot_list', 'em_hot_rank')
-                    OR coalesce(symbol, '') = ''
-                  )
-                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
-                LIMIT ?
-                """,
-                (symbol.upper(), limit),
-            )
-        else:
-            rows = self._fetch_all(
-                """
-                SELECT module, source, data_key, symbol, record_date, payload_json, fetched_at
-                FROM module_records
-                WHERE module = 'sentiment'
-                ORDER BY fetched_at DESC, record_date DESC NULLS LAST
-                LIMIT ?
-                """,
-                (limit,),
-            )
-        return [_flatten_module_record(row) for row in rows]
-
     def security_freshness(self, symbol: str) -> dict[str, str]:
         checks = {
             "market": self._latest_market_bar(symbol),
@@ -2627,6 +2108,11 @@ def _first_present(*values: Any) -> Any:
         if value is not None and value != "":
             return value
     return None
+
+
+def _join_non_empty(*values: Any) -> str | None:
+    parts = [str(value).strip() for value in values if value is not None and str(value).strip()]
+    return " / ".join(parts) if parts else None
 
 
 def _latest_fetched_at(rows: list[dict[str, Any]]) -> Any:

@@ -56,10 +56,12 @@
 - ETF Options V1 treats Sina hq.sinajs as the read-only primary source for 50ETF, 300ETF, STAR 50 ETF and 500ETF option chains. Greeks and IV are source-provided; the app does not calculate BSM values, does not download files, and does not provide option strategy/trading execution.
 - ETF Options refresh intentionally samples near-month option details only, while retaining the near-month contract list, so Sina endpoint latency or TLS failures do not block the module indefinitely.
 - Windows backend environments require `tzdata` for `ZoneInfo("Asia/Shanghai")`; it is now a declared backend dependency to keep tests and local runtime reproducible.
-- The integrated worktree branch combines Fundamentals, Limit-Up Board, ETF Options, and Sentiment module work. `/api/modules/{module_id}/data` can now return structured `fundamentals`, `limit_up`, `etf_options`, and `sentiment` payloads alongside the earlier module payloads.
+- The integrated worktree branch originally combined Fundamentals, Limit-Up Board, ETF Options, and Sentiment module work; the current exposed product surface keeps Fundamentals and ETF Options while retiring Limit-Up Board and Sentiment.
 - Global UI defaults are now dark theme tokens. Module, System, topbar, table, empty-state, toast, progress, and fallback surfaces should render against dark backgrounds by default; Security and K-line keep their specialized dark workspace layout.
-- Limit-Up Board refresh is market/date scoped and accepts `trade_date`; it should not be treated as a normal single-symbol background refresh.
 - Local development CORS allows localhost/127.0.0.1/[::1] ports so Vite fallback ports can call the backend during UI QA without loosening access to non-local origins.
+- The workbench module surface was simplified from 10 modules to 8 in this order: Market, Fundamentals, Announcements, News, Research Reports, Chip/Liquidity, Signals, ETF Options. Limit-Up Board and Sentiment are no longer exposed as product modules or refresh/data APIs; historical local cache tables/records are preserved.
+- Selecting a symbol now refreshes symbol-scoped research modules concurrently and prefetches the 8 module data payloads into a front-end cache so module switches can display cached results immediately while the active module fetches fresh data.
+- Structured module UIs show Source Capabilities before Source Status, and business metric cards should not duplicate connector status badges such as `Connector fresh`; connector health belongs in Source Capabilities and Source Status.
 
 ## Secrets
 - No secrets are stored in this project memory.

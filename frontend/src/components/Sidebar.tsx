@@ -45,7 +45,7 @@ export function Sidebar({
 
       <div className="module-list-label">
         <Layers aria-hidden="true" size={15} />
-        <span>Ten-layer modules</span>
+        <span>Modules</span>
       </div>
 
       <nav className="module-list" aria-label="Data modules">

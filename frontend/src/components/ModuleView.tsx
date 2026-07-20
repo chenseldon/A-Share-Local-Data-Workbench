@@ -5,9 +5,11 @@ import type {
   ChartResponse,
   DataRow,
   MarketModuleSection,
+  MarketSourceStatus,
   MarketQuote,
   ModuleDataResponse,
   ModuleDefinition,
+  ReportModuleSection,
   ReportModuleTableColumn,
   Security
 } from "../types";
@@ -112,6 +114,92 @@ function renderReportCell(value: unknown, column: ReportModuleTableColumn, row: 
   return displayValue(value);
 }
 
+function splitReportSections(sections: ReportModuleSection[]) {
+  return {
+    sourceCapabilities: sections.find((section) => section.id === "source_capabilities"),
+    contentSections: sections.filter((section) => section.id !== "source_capabilities")
+  };
+}
+
+function renderReportSection(section: ReportModuleSection) {
+  const cards = section.cards.filter((card) => !card.status);
+  if (cards.length === 0) {
+    return null;
+  }
+  return (
+    <section key={section.id} className="panel market-snapshot-panel module-report-section">
+      <div className="section-heading">
+        <div>
+          <h2>{section.title}</h2>
+        </div>
+        <span className="market-section-meta">
+          Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+        </span>
+      </div>
+      <div className="snapshot-grid module-dynamic-grid">
+        {cards.map((card) => (
+          <div key={`${section.id}-${card.label}`}>
+            <span>{card.label}</span>
+            <strong>{displayValue(card.value)}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SourceCapabilitiesPanel({ section }: { section: ReportModuleSection | undefined }) {
+  if (!section) {
+    return null;
+  }
+  return (
+    <section className="panel market-snapshot-panel module-report-section">
+      <div className="section-heading">
+        <div>
+          <h2>{section.title}</h2>
+        </div>
+        <span className="market-section-meta">
+          Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
+        </span>
+      </div>
+      <div className="snapshot-grid module-dynamic-grid">
+        {section.cards.map((card) => (
+          <div key={`source-capability-${card.label}`}>
+            <span>{card.label}</span>
+            <strong>{displayValue(card.value)}</strong>
+            {card.status && <StatusBadge status={card.status} />}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SourceStatusPanel({ sources }: { sources: MarketSourceStatus[] }) {
+  return (
+    <section className="panel module-market-strip">
+      <div className="section-heading">
+        <div>
+          <h2>Source Status</h2>
+        </div>
+        <RadioTower aria-hidden="true" size={20} />
+      </div>
+      <div className="market-source-grid">
+        {sources.map((source) => (
+          <div key={source.source} className="market-source-card">
+            <div>
+              <strong>{source.source}</strong>
+              <StatusBadge status={source.status} />
+            </div>
+            {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
+            {source.last_error && <p>{source.last_error}</p>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function ModuleView({
   module,
   data,
@@ -140,7 +228,7 @@ export function ModuleView({
   onSelectSymbol
 }: ModuleViewProps) {
   if (!module) {
-    return <EmptyState title="Unknown module" detail="Select one of the ten configured navigation modules." />;
+    return <EmptyState title="Unknown module" detail="Select one of the eight configured navigation modules." />;
   }
 
   if (module.id === "market") {
@@ -423,6 +511,7 @@ export function ModuleView({
     const fundamentalsSections = fundamentalsPayload?.sections ?? [];
     const fundamentalsTables = fundamentalsPayload?.tables ?? [];
     const visibleFundamentalsTables = fundamentalsTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(fundamentalsSections);
 
     return (
       <div className="content-grid module-reports-grid module-fundamentals-grid">
@@ -446,27 +535,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {fundamentalsSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={fundamentalsPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleFundamentalsTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -474,32 +545,10 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(fundamentalsPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {fundamentalsSections.length === 0 && visibleFundamentalsTables.length === 0 && (
               <EmptyState title="No fundamentals payload" detail="The fundamentals connector returned no structured sections or table rows for this symbol." />
@@ -566,6 +615,7 @@ export function ModuleView({
     const optionSections = optionsPayload?.sections ?? [];
     const optionTables = optionsPayload?.tables ?? [];
     const visibleOptionTables = optionTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(optionSections);
 
     return (
       <div className="content-grid module-reports-grid module-etf-options-grid">
@@ -589,27 +639,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {optionSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={optionsPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleOptionTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -617,32 +649,10 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(optionsPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {optionSections.length === 0 && visibleOptionTables.length === 0 && (
               <EmptyState title="No ETF options payload" detail="Refresh the module to collect Sina ETF option chains, T-quotes, Greeks and implied volatility." />
@@ -695,6 +705,7 @@ export function ModuleView({
     const announcementSections = announcementsPayload?.sections ?? [];
     const announcementTables = announcementsPayload?.tables ?? [];
     const visibleAnnouncementTables = announcementTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(announcementSections);
 
     return (
       <div className="content-grid module-reports-grid module-announcements-grid">
@@ -718,27 +729,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {announcementSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={announcementsPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleAnnouncementTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -746,32 +739,10 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(announcementsPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {announcementSections.length === 0 && visibleAnnouncementTables.length === 0 && (
               <EmptyState title="No announcements payload" detail="The announcements connector returned no structured sections or table rows for this symbol." />
@@ -824,6 +795,7 @@ export function ModuleView({
     const newsSections = newsPayload?.sections ?? [];
     const newsTables = newsPayload?.tables ?? [];
     const visibleNewsTables = newsTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(newsSections);
 
     return (
       <div className="content-grid module-reports-grid module-news-grid">
@@ -847,27 +819,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {newsSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={newsPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleNewsTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -875,32 +829,10 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(newsPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {newsSections.length === 0 && visibleNewsTables.length === 0 && (
               <EmptyState title="No news payload" detail="The news connectors returned no structured sections or table rows for this symbol." />
@@ -953,6 +885,7 @@ export function ModuleView({
     const reportSections = reportsPayload?.sections ?? [];
     const reportTables = reportsPayload?.tables ?? [];
     const visibleTables = reportTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(reportSections);
 
     return (
       <div className="content-grid module-reports-grid">
@@ -976,27 +909,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {reportSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={reportsPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -1004,32 +919,10 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(reportsPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {reportSections.length === 0 && visibleTables.length === 0 && (
               <EmptyState title="No research report payload" detail="The reports connector returned no structured sections or table rows for this symbol." />
@@ -1082,6 +975,7 @@ export function ModuleView({
     const signalSections = signalsPayload?.sections ?? [];
     const signalTables = signalsPayload?.tables ?? [];
     const visibleSignalTables = signalTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(signalSections);
 
     return (
       <div className="content-grid module-reports-grid module-signals-grid">
@@ -1105,27 +999,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {signalSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={signalsPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleSignalTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -1133,288 +1009,13 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(signalsPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {signalSections.length === 0 && visibleSignalTables.length === 0 && (
               <EmptyState title="No signals payload" detail="The signals connector returned no structured sections or table rows for this symbol." />
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-
-  if (module.id === "sentiment") {
-    if (!selectedSymbol) {
-      return (
-        <div className="security-start-screen module-market-start">
-          <section className="security-start-card">
-            <div>
-              <span className="start-eyebrow">Sentiment Layer</span>
-              <h1>Search a symbol to inspect sentiment context</h1>
-              <p>Sentiment uses CNINFO investor Q&A, 10jqka hot list, Eastmoney popularity rank and Eastmoney concept hits where sources are available.</p>
-            </div>
-            <div className="start-search-box">
-              <input
-                aria-label="Search or resolve A-share symbol"
-                value={searchQuery}
-                placeholder="Search symbol or Chinese name"
-                onChange={(event) => onSearchQueryChange(event.target.value)}
-              />
-              {(searchQuery || isSearching) && (
-                <div className="start-search-results">
-                  {isSearching && <div className="start-search-row muted">Searching local free-stockdb directory...</div>}
-                  {!isSearching && searchResults.length === 0 && searchQuery && (
-                    <div className="start-search-row muted">No local free-stockdb match.</div>
-                  )}
-                  {searchResults.slice(0, 5).map((result) => (
-                    <button key={result.symbol} className="start-search-row" type="button" onClick={() => onSelectSymbol(result.symbol)}>
-                      <span>{result.symbol}</span>
-                      <strong>{result.name}</strong>
-                      <small>{result.exchange}</small>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
-      );
-    }
-
-    const sentimentPayload = data?.sentiment;
-    const sentimentSections = sentimentPayload?.sections ?? [];
-    const sentimentTables = sentimentPayload?.tables ?? [];
-    const visibleSentimentTables = sentimentTables.filter((table) => table.rows.length > 0);
-
-    return (
-      <div className="content-grid module-reports-grid module-signals-grid module-sentiment-grid">
-        <section className="panel hero-panel module-dark-hero">
-          <div>
-            <h1>{module.label}</h1>
-            <p>{module.layer} - CNINFO investor Q&A, 10jqka hot list, Eastmoney popularity and concept-hit context with explicit source boundaries.</p>
-          </div>
-          <div className="security-meta">
-            <span>{selectedSymbol}</span>
-            <StatusBadge status={data?.status ?? module.status} />
-            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
-              <RefreshCw aria-hidden="true" size={14} />
-              {moduleRefreshing ? "Refreshing" : "Refresh module"}
-            </button>
-          </div>
-        </section>
-
-        {loading && <div className="panel loading-panel">Loading sentiment module data...</div>}
-        {error && <EmptyState title="Sentiment request failed" detail={error} />}
-
-        {!loading && !error && (
-          <>
-            {sentimentSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-
-            {visibleSentimentTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                  <StatusBadge status="fresh" />
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(sentimentPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {sentimentSections.length === 0 && visibleSentimentTables.length === 0 && (
-              <EmptyState title="No sentiment payload" detail="The sentiment connectors returned no structured sections or table rows for this symbol." />
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-
-  if (module.id === "limit_up") {
-    const limitUpPayload = data?.limit_up;
-    const limitUpSections = limitUpPayload?.sections ?? [];
-    const limitUpTables = limitUpPayload?.tables ?? [];
-    const visibleLimitUpTables = limitUpTables.filter((table) => table.rows.length > 0);
-    const selectedHits = limitUpPayload?.selected_symbol_hits ?? [];
-
-    return (
-      <div className="content-grid module-reports-grid module-limit-up-grid">
-        <section className="panel hero-panel module-dark-hero">
-          <div>
-            <h1>{module.label}</h1>
-            <p>{module.layer} · Eastmoney push2ex limit-up, broken-board, limit-down and yesterday limit-up pools, plus 10jqka reason insight where available.</p>
-          </div>
-          <div className="security-meta">
-            <span>{selectedSymbol ?? "Market-wide"}</span>
-            {limitUpPayload?.trade_date && <span>{limitUpPayload.trade_date}</span>}
-            <StatusBadge status={data?.status ?? module.status} />
-            <button className="secondary-button" onClick={onRefreshModule} disabled={moduleRefreshing}>
-              <RefreshCw aria-hidden="true" size={14} />
-              {moduleRefreshing ? "Refreshing" : "Refresh module"}
-            </button>
-          </div>
-        </section>
-
-        {loading && <div className="panel loading-panel">Loading limit-up board data...</div>}
-        {error && <EmptyState title="Limit-up board request failed" detail={error} />}
-
-        {!loading && !error && (
-          <>
-            {limitUpSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-
-            {selectedSymbol && (
-              <section className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>Selected Symbol Hits</h2>
-                  </div>
-                  <StatusBadge status={selectedHits.length > 0 ? "fresh" : "not_collected"} />
-                </div>
-                {selectedHits.length > 0 ? (
-                  <DataTable
-                    rows={selectedHits}
-                    columns={[
-                      { key: "pool", label: "Pool" },
-                      { key: "symbol", label: "Symbol" },
-                      { key: "name", label: "Name" },
-                      { key: "price", label: "Price" },
-                      { key: "pct", label: "Change %" },
-                      { key: "reason", label: "Reason" },
-                      { key: "zt_stat", label: "N-day boards" },
-                      { key: "source", label: "Source" },
-                      { key: "fetched_at", label: "Fetched at" }
-                    ]}
-                    renderCell={renderReportCell}
-                  />
-                ) : (
-                  <EmptyState title="No selected-symbol hit" detail="The current symbol is not present in cached limit-up, broken-board, limit-down, yesterday limit-up or 10jqka insight rows." />
-                )}
-              </section>
-            )}
-
-            {visibleLimitUpTables.map((table) => (
-              <section key={table.id} className="panel module-market-strip">
-                <div className="section-heading">
-                  <div>
-                    <h2>{table.title}</h2>
-                  </div>
-                  <StatusBadge status="fresh" />
-                </div>
-                <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
-              </section>
-            ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(limitUpPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {limitUpSections.length === 0 && visibleLimitUpTables.length === 0 && (
-              <EmptyState title="No limit-up board payload" detail="Refresh the module to collect Eastmoney push2ex pools and 10jqka limit-up insight for the selected trade date." />
             )}
           </>
         )}
@@ -1464,6 +1065,7 @@ export function ModuleView({
     const chipSections = chipPayload?.sections ?? [];
     const chipTables = chipPayload?.tables ?? [];
     const visibleChipTables = chipTables.filter((table) => table.rows.length > 0);
+    const { sourceCapabilities, contentSections } = splitReportSections(chipSections);
 
     return (
       <div className="content-grid module-reports-grid module-chip-grid">
@@ -1487,27 +1089,9 @@ export function ModuleView({
 
         {!loading && !error && (
           <>
-            {chipSections.map((section) => (
-              <section key={section.id} className="panel market-snapshot-panel module-report-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>{section.title}</h2>
-                  </div>
-                  <span className="market-section-meta">
-                    Source: {displayValue(section.source)} <span>Time: {formatPanelTime(section.fetched_at)}</span>
-                  </span>
-                </div>
-                <div className="snapshot-grid module-dynamic-grid">
-                  {section.cards.map((card) => (
-                    <div key={`${section.id}-${card.label}`}>
-                      <span>{card.label}</span>
-                      <strong>{displayValue(card.value)}</strong>
-                      {card.status && <StatusBadge status={card.status} />}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+            <SourceCapabilitiesPanel section={sourceCapabilities} />
+            <SourceStatusPanel sources={chipPayload?.source_status ?? []} />
+            {contentSections.map(renderReportSection)}
 
             {visibleChipTables.map((table) => (
               <section key={table.id} className="panel module-market-strip">
@@ -1515,32 +1099,10 @@ export function ModuleView({
                   <div>
                     <h2>{table.title}</h2>
                   </div>
-                  <StatusBadge status="fresh" />
                 </div>
                 <DataTable rows={table.rows} columns={table.columns} renderCell={renderReportCell} />
               </section>
             ))}
-
-            <section className="panel module-market-strip">
-              <div className="section-heading">
-                <div>
-                  <h2>Source Status</h2>
-                </div>
-                <RadioTower aria-hidden="true" size={20} />
-              </div>
-              <div className="market-source-grid">
-                {(chipPayload?.source_status ?? []).map((source) => (
-                  <div key={source.source} className="market-source-card">
-                    <div>
-                      <strong>{source.source}</strong>
-                      <StatusBadge status={source.status} />
-                    </div>
-                    {sourceStatusDetail(source) && <span>{sourceStatusDetail(source)}</span>}
-                    {source.last_error && <p>{source.last_error}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
 
             {chipSections.length === 0 && visibleChipTables.length === 0 && (
               <EmptyState title="No chip/liquidity payload" detail="The chip and liquidity connector returned no structured sections or table rows for this symbol." />

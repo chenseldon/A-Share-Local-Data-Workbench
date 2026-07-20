@@ -114,6 +114,7 @@ def cls_telegraph(page_size: int = 50, client: httpx.Client | None = None) -> li
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             continue
+        article_id = item.get("id")
         timestamp = item.get("ctime")
         news_time = datetime.fromtimestamp(timestamp, tz=UTC).isoformat() if isinstance(timestamp, (int, float)) else fetched_at.isoformat()
         title = item.get("title") or item.get("brief") or ""
@@ -123,7 +124,7 @@ def cls_telegraph(page_size: int = 50, client: httpx.Client | None = None) -> li
             "summary": _clean_text(item.get("content") or item.get("brief"))[:300],
             "time": news_time,
             "media": "CLS",
-            "url": item.get("shareurl") or item.get("url"),
+            "url": f"https://www.cls.cn/detail/{article_id}" if article_id else item.get("url"),
             "source": "cls_telegraph",
         }
         records.append(
@@ -164,13 +165,14 @@ def eastmoney_global_news(page_size: int = 50, client: httpx.Client | None = Non
         if not isinstance(item, dict):
             continue
         news_time = item.get("showTime") or item.get("showtime") or fetched_at.isoformat()
+        article_id = item.get("code") or item.get("id")
         row = {
             "symbol": None,
             "title": _clean_text(item.get("title")),
             "summary": _clean_text(item.get("summary") or item.get("digest"))[:300],
             "time": news_time,
             "media": item.get("mediaName") or "Eastmoney",
-            "url": item.get("url") or item.get("artUrl"),
+            "url": item.get("url") or item.get("artUrl") or (f"https://kuaixun.eastmoney.com/detail.html?id={article_id}" if article_id else None),
             "source": "eastmoney_global_news",
         }
         records.append(

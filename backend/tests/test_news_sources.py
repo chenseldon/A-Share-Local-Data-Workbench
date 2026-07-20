@@ -59,7 +59,7 @@ def test_cls_telegraph_uses_signed_v1_query_and_market_wide_records() -> None:
                             "ctime": 1784165400,
                             "title": "CLS title",
                             "content": "CLS content",
-                            "shareurl": "https://www.cls.cn/detail/cls-1",
+                            "shareurl": "https://api3.cls.cn/share/article/2430630?os=web&sv=7.7.5&app=",
                         }
                     ]
                 },
@@ -93,7 +93,6 @@ def test_eastmoney_global_news_parses_fast_news_list() -> None:
                             "summary": "Global summary",
                             "showTime": "2026-07-15 08:00:00",
                             "mediaName": "Eastmoney",
-                            "url": "https://kuaixun.eastmoney.com/a/global-1.html",
                         }
                     ]
                 }
@@ -108,4 +107,4 @@ def test_eastmoney_global_news_parses_fast_news_list() -> None:
     assert records[0].symbol is None
     assert records[0].record_date == "2026-07-15"
     assert records[0].payload["summary"] == "Global summary"
-    assert records[0].payload["url"] == "https://kuaixun.eastmoney.com/a/global-1.html"
+    assert records[0].payload["url"] == "https://kuaixun.eastmoney.com/detail.html?id=global-1"

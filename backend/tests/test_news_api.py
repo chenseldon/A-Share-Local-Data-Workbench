@@ -82,10 +82,7 @@ def test_news_module_data_returns_structured_payload(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["rows"][0]["title"] == "Mock stock news"
-    assert payload["news"]["sections"][0]["title"] == "Stock News Snapshot"
-    assert payload["news"]["sections"][0]["cards"][0]["value"] == 1
-    assert payload["news"]["sections"][1]["cards"][0]["value"] == 1
-    assert payload["news"]["sections"][1]["cards"][1]["value"] == 1
+    assert [section["title"] for section in payload["news"]["sections"]] == ["Source Capabilities"]
     assert payload["news"]["tables"][0]["rows"][0]["url"].endswith("stock-news-1.html")
     assert payload["news"]["tables"][1]["rows"][0]["title"] == "Mock CLS telegram"
     assert payload["news"]["tables"][2]["rows"][0]["title"] == "Mock global news"
